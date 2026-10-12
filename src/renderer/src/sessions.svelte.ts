@@ -96,10 +96,17 @@ export interface Session {
   // delegating = the MAIN turn has ended but subagents are still working: the
   // same amber as waiting, without the pulse (the pulse stays reserved for
   // "it wants you", the only state that should catch your eye).
-  status: 'running' | 'waiting' | 'delegating' | 'idle' | 'exited'
+  // unstarted = a restored row nobody has selected yet: no PTY, no process, so
+  // nothing to observe — a grey dot rather than a green one that claims an
+  // agent is waiting. Selecting the row starts it (startSession).
+  status: 'running' | 'waiting' | 'delegating' | 'idle' | 'exited' | 'unstarted'
   // Live terminal title (OSC 0/2) — Claude Code keeps it set to the
   // conversation's name; Git Bash sets it to the cwd. Observation only.
   title: string
+  // The last non-empty title with Claude's spinner stripped — what the state
+  // file keeps, so an unstarted row still reads as its conversation's name.
+  // A separate field so the spinner churning `title` never re-saves the state.
+  lastTitle: string
   ptyId: string | null
   // The session's CURRENT Claude conversation id — the pinned spawn id, but
   // Claude Code mints a fresh one on `/clear`, so each agent poll re-points it
@@ -477,6 +484,7 @@ function createSession(init: {
     name: init.name ?? '',
     status: isAgent(init.type) ? 'idle' : 'running',
     title: '',
+    lastTitle: '',
     ptyId: null,
     claudeSessionId: null,
     hookToken: null,
@@ -519,6 +527,27 @@ export function setStatus(session: Session, next: Session['status']): void {
   // re-asserted it.
   if (next !== session.status) session.statusSince = Date.now()
   session.status = next
+}
+
+// Lazy start: restore brings every row back `unstarted` (no PTY) and the row
+// spawns the first time it is selected — App mounts its Terminal once the
+// status leaves `unstarted`. A resumed agent does nothing until you type into
+// it, so starting all of them at boot bought a long load and a tower of green
+// dots that said nothing. The status is set directly, not via setStatus, by the
+// same rule restore follows: going live is not the colour change that clears a
+// TODO flag.
+export function startSession(session: Session): void {
+  if (session.status !== 'unstarted') return
+  session.status = isAgent(session.type) ? 'idle' : 'running'
+  session.statusSince = Date.now()
+}
+
+// A terminal title arrived (OSC 0/2). lastTitle only moves when the spinner-free
+// text does, which is what keeps the state file from re-saving on every frame.
+export function applyTitle(session: Session, title: string): void {
+  session.title = title
+  const clean = cleanTitle(title)
+  if (clean) session.lastTitle = clean
 }
 
 // Status writes that belong to the DEFAULT technique. When the screen scan owns
@@ -850,7 +879,11 @@ function findEntry(session: Session, entries: AgentEntry[]): AgentEntry | undefi
 // conversation into the background process now running it (findEntry).
 export function applyAgents(entries: AgentEntry[]): void {
   for (const session of sessions) {
-    if (session.type !== 'claude' || session.status === 'exited') continue
+    // An unstarted row carries its restored conversation id but no process of
+    // ours — an entry with that id is someone else's claude (the user resuming
+    // it in another window), and must not paint this row.
+    if (session.type !== 'claude' || session.status === 'exited' || session.status === 'unstarted')
+      continue
     // A session with neither handle yet (spawned, first poll not matched) can't
     // be identified — skip rather than match something else by accident.
     if (session.claudePid === null && !session.claudeSessionId) continue
@@ -1152,6 +1185,14 @@ export async function restoreState(): Promise<void> {
     // Absent for every session written before the Notes tab existed, and for
     // every session whose notes are empty (see snapshotState).
     restored.notes = s.notes ?? ''
+    // No PTY until the row is selected (startSession). Until then the row has
+    // to carry what the spawn would have reported: the conversation id (or the
+    // next save would drop it, and with it the resume) and its last title (or
+    // every Claude row would read "Claude"). Absent title → '' for files
+    // written before lazy start; the spawn's own title replaces it either way.
+    restored.status = 'unstarted'
+    restored.claudeSessionId = restored.resumeId
+    restored.title = restored.lastTitle = s.title ?? ''
     sessions.push(restored)
     colorIndex++
   }
@@ -1213,6 +1254,8 @@ export function snapshotState(): PersistedState {
       // An empty editor is not state — only text anyone actually typed is
       // written, so the file doesn't grow a `"notes": ""` per session.
       notes: s.notes || undefined,
+      // What an unstarted row reads as after the next restart (restoreState).
+      title: s.lastTitle || undefined,
       // Only a NAMED pending flag persists: restoring '' (auto-name) would
       // mint a second random worktree — the orphan stays visible in the
       // reopen menu instead.
@@ -1301,6 +1344,7 @@ function swapInRelaunch(session: Session): void {
   next.todo = session.todo
   next.archived = session.archived
   next.notes = session.notes
+  next.lastTitle = session.lastTitle
   next.view = session.view
   sessions.splice(index, 1, next)
   if (ui.focused === session.key) ui.focused = next.key

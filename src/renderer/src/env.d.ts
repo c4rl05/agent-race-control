@@ -65,6 +65,9 @@ interface PersistedState {
     // The Notes tab's text — additive/optional, and written only when the
     // user typed something (absent → an empty editor).
     notes?: string
+    // The last terminal title, spinner stripped — what an unstarted row reads
+    // as until it is selected. Additive/optional, written only when non-empty.
+    title?: string
   }>
 }
 

@@ -12,6 +12,9 @@ export interface PersistedSession {
   // The Notes tab's text. Optional/additive like the fields on AppState below:
   // absent means the user never typed any, so it needs no version bump.
   notes?: string
+  // The last terminal title, so a row restored unstarted keeps its name.
+  // Optional/additive, same rule.
+  title?: string
 }
 
 export interface AppState {

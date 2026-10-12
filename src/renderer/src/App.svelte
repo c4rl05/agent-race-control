@@ -105,6 +105,8 @@
     moveGroup,
     moveSession,
     setStatus,
+    startSession,
+    applyTitle,
     toggleTodo,
     setArchived,
     expandedArchives,
@@ -520,6 +522,13 @@
     if (restored) window.arc.state.save(snapshot)
   })
 
+  // Lazy start: a restored row spawns the first time it is selected — and the
+  // row focused at shutdown on boot, so the app opens on a live terminal.
+  $effect(() => {
+    const session = sessions.find((s) => s.key === ui.focused)
+    if (session) startSession(session)
+  })
+
   // Keep awake: main holds the power request (awake.ts). Sent only after
   // restore, so a saved OFF never briefly takes the hold at boot.
   $effect(() => {
@@ -876,6 +885,7 @@
       all.find((s) => s.status === 'delegating') ??
       all.find((s) => s.status === 'running') ??
       all.find((s) => s.status === 'idle') ??
+      all.find((s) => s.status === 'unstarted') ??
       all.find((s) => s.status === 'exited')
     return pick
       ? { status: pick.status, plain: pick.type === 'shell', archived: pick.archived }
@@ -1384,52 +1394,54 @@
              Alone among the panes it takes a font SCALE rather than CSS zoom:
              the size change has to re-measure the cell, reflow the grid and
              resize the PTY, which is what Ctrl+wheel does in Windows Terminal.
-             Scaling the canvas instead would just enlarge the old grid. -->
+             Scaling the canvas instead would just enlarge the old grid.
+             Not mounted at all while the row is unstarted: mounting it IS the
+             spawn, and a restored row only spawns once selected. -->
         <div
           class="view"
           style:display={session.view === 'terminal' ? 'block' : 'none'}
           onwheelcapture={(e) => zoomWheel('terminal', e)}
         >
-          <Terminal
-            type={session.type}
-            cwd={session.cwd}
-            resume={session.resumeId ?? undefined}
-            worktree={session.spawnWorktree ?? undefined}
-            active={ui.focused === session.key && session.view === 'terminal'}
-            {focusEpoch}
-            theme={palette.xterm}
-            fontFamily={monoFont}
-            fontScale={zoomFactor('terminal')}
-            onSpawned={(ptyId, claudeSessionId, cwd) => {
-              session.ptyId = ptyId
-              // The pinned spawn id is the first join key against the agent
-              // poll; from the first match on it we follow the claude pid,
-              // which survives a /clear (see applyAgents).
-              session.claudeSessionId = claudeSessionId ?? null
-              // Immutable hook routing token: claudeSessionId may change on
-              // /clear, hookToken never does (see applyHook, issue #2). The
-              // pinned id is also the first join key for the agent poll, which
-              // then follows the claude pid instead.
-              session.hookToken = claudeSessionId ?? null
-              session.claudePid = null
-              session.claudeStartedAt = null
-              applySpawnCwd(session.key, cwd)
-            }}
-            onExited={() => {
-              // A relaunch kills the PTY on purpose and swaps the row for a
-              // resumed one — that exit is the mechanism, not the end of the
-              // session, so it must not paint the row exited on the way past.
-              if (!finishRelaunch(session.key)) setStatus(session, 'exited')
-            }}
-            scanning={session.type === 'codex' ||
-              (ui.statusSource === 'screen' && session.type === 'claude')}
-            onScreen={(state) => applyScreen(session.key, state)}
-            onSession={(sessionId, name) => applyDiscoveredSession(session.key, sessionId, name)}
-            onInput={(data) => nudgeStatusFromKey(session.key, data)}
-            onTitle={(title) => {
-              session.title = title
-            }}
-          />
+          {#if session.status !== 'unstarted'}
+            <Terminal
+              type={session.type}
+              cwd={session.cwd}
+              resume={session.resumeId ?? undefined}
+              worktree={session.spawnWorktree ?? undefined}
+              active={ui.focused === session.key && session.view === 'terminal'}
+              {focusEpoch}
+              theme={palette.xterm}
+              fontFamily={monoFont}
+              fontScale={zoomFactor('terminal')}
+              onSpawned={(ptyId, claudeSessionId, cwd) => {
+                session.ptyId = ptyId
+                // The pinned spawn id is the first join key against the agent
+                // poll; from the first match on it we follow the claude pid,
+                // which survives a /clear (see applyAgents).
+                session.claudeSessionId = claudeSessionId ?? null
+                // Immutable hook routing token: claudeSessionId may change on
+                // /clear, hookToken never does (see applyHook, issue #2). The
+                // pinned id is also the first join key for the agent poll, which
+                // then follows the claude pid instead.
+                session.hookToken = claudeSessionId ?? null
+                session.claudePid = null
+                session.claudeStartedAt = null
+                applySpawnCwd(session.key, cwd)
+              }}
+              onExited={() => {
+                // A relaunch kills the PTY on purpose and swaps the row for a
+                // resumed one — that exit is the mechanism, not the end of the
+                // session, so it must not paint the row exited on the way past.
+                if (!finishRelaunch(session.key)) setStatus(session, 'exited')
+              }}
+              scanning={session.type === 'codex' ||
+                (ui.statusSource === 'screen' && session.type === 'claude')}
+              onScreen={(state) => applyScreen(session.key, state)}
+              onSession={(sessionId, name) => applyDiscoveredSession(session.key, sessionId, name)}
+              onInput={(data) => nudgeStatusFromKey(session.key, data)}
+              onTitle={(title) => applyTitle(session, title)}
+            />
+          {/if}
         </div>
         <!-- Notes stay mounted with the terminal rather than mounting per tab
              like Preview/Info: a textarea that unmounts loses its undo history
@@ -1933,6 +1945,7 @@
       {:else}
         {@const menuSession = sessions.find((s) => menu?.kind === 'session' && s.key === menu.key)}
         {#if menuSession}
+          {@const live = menuSession.status !== 'unstarted'}
           <button
             class="menu-item"
             onclick={() => {
@@ -1960,16 +1973,20 @@
           >
             <span class="material-symbols-outlined">tab_duplicate</span>Duplicate session
           </button>
-          <button
-            class="menu-item"
-            onclick={() => {
-              renaming = menuSession.key
-              menu = null
-            }}
-          >
-            <span class="material-symbols-outlined">edit</span>Rename
-          </button>
-          {#if traitsOf(menuSession.type)?.color}
+          <!-- An unstarted row has no PTY: nothing to type /rename, /color into
+               and nothing to relaunch. A local-label rename still works. -->
+          {#if live || !traitsOf(menuSession.type)?.rename}
+            <button
+              class="menu-item"
+              onclick={() => {
+                renaming = menuSession.key
+                menu = null
+              }}
+            >
+              <span class="material-symbols-outlined">edit</span>Rename
+            </button>
+          {/if}
+          {#if live && traitsOf(menuSession.type)?.color}
             <button
               class="menu-item"
               onclick={() => {
@@ -1980,7 +1997,7 @@
               <span class="material-symbols-outlined">palette</span>Apply folder color
             </button>
           {/if}
-          {#if traitsOf(menuSession.type) && menuSession.claudeSessionId}
+          {#if live && traitsOf(menuSession.type) && menuSession.claudeSessionId}
             <button
               class="menu-item"
               onclick={() => {
@@ -3144,6 +3161,12 @@
   .dot.exited {
     --dot-fill: var(--fg-muted);
     opacity: 0.5;
+  }
+
+  /* unstarted: restored, not yet selected — no process, so no status to show.
+     Exited's grey at full strength: "not running", without exited's fade. */
+  .dot.unstarted {
+    --dot-fill: var(--fg-muted);
   }
 
   /* TODO overlay (issue #3): a cosmetic per-session "revisit later" flag,

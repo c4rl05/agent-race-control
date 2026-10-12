@@ -29,6 +29,10 @@ import {
   relaunchSession,
   finishRelaunch,
   applyScreen,
+  restoreState,
+  snapshotState,
+  startSession,
+  applyTitle,
   ui
 } from './sessions.svelte'
 
@@ -40,6 +44,7 @@ function fakeSession(overrides: Partial<Session>): Session {
     name: '',
     status: 'idle',
     title: '',
+    lastTitle: '',
     ptyId: '1',
     claudeSessionId: 'sid',
     hookToken: 'tok',
@@ -951,6 +956,7 @@ describe('relaunch', () => {
           ptyId: '7',
           claudeSessionId: 'conv-1',
           notes: 'keep me',
+          lastTitle: 'keep my name',
           todo: true,
           view: 'notes'
         })
@@ -974,6 +980,7 @@ describe('relaunch', () => {
       expect(next.notes).toBe('keep me')
       expect(next.todo).toBe(true)
       expect(next.view).toBe('notes')
+      expect(next.lastTitle).toBe('keep my name')
       expect(ui.focused).toBe(next.key)
     })
   })
@@ -1118,5 +1125,85 @@ describe('status source (which technique colours the dot)', () => {
     applyScreen(2, 'running')
     expect(sessions[0].status).toBe('running')
     expect(sessions[1].status).toBe('exited')
+  })
+})
+
+// Lazy start: restore brings every row back with no PTY, and selecting a row is
+// what spawns it. Last in the file on purpose — restoreState runs once per
+// module load and writes ui/dirOrder state the earlier blocks don't expect.
+describe('lazy start', () => {
+  it('restores every row unstarted, carrying its conversation id and last title', async () => {
+    const g = globalThis as unknown as { window?: unknown }
+    g.window = {
+      arc: {
+        state: {
+          load: async () => ({
+            version: 2,
+            mode: 'system',
+            focusedIndex: 1,
+            sessions: [
+              {
+                type: 'claude',
+                name: '',
+                cwd: 'D:\\a',
+                claudeSessionId: 'c1',
+                title: 'Fix the bug',
+                todo: true
+              },
+              { type: 'codex', name: 'codex label', cwd: 'D:\\a', claudeSessionId: 'x1' },
+              { type: 'shell', name: '', cwd: 'D:\\b', claudeSessionId: null }
+            ]
+          })
+        }
+      }
+    }
+    try {
+      await restoreState()
+    } finally {
+      delete g.window
+      dirOrder.length = 0
+    }
+    expect(sessions.map((s) => s.status)).toEqual(['unstarted', 'unstarted', 'unstarted'])
+    // Without these the next save would drop the resume handle and the name.
+    expect(sessions[0].claudeSessionId).toBe('c1')
+    expect(sessions[0].title).toBe('Fix the bug')
+    expect(sessions[1].claudeSessionId).toBe('x1')
+    expect(sessions[2].claudeSessionId).toBe(null)
+    expect(ui.focused).toBe(sessions[1].key)
+  })
+
+  it('starting goes live without clearing the TODO flag', () => {
+    sessions.push(
+      fakeSession({ key: 1, status: 'unstarted', ptyId: null, todo: true }),
+      fakeSession({ key: 2, type: 'shell', status: 'unstarted', ptyId: null })
+    )
+    startSession(sessions[0])
+    startSession(sessions[1])
+    expect(sessions[0].status).toBe('idle')
+    expect(sessions[0].todo).toBe(true)
+    expect(sessions[1].status).toBe('running')
+  })
+
+  it('starting a live row is a no-op', () => {
+    sessions.push(fakeSession({ key: 1, status: 'running' }))
+    startSession(sessions[0])
+    expect(sessions[0].status).toBe('running')
+  })
+
+  it('the poll leaves an unstarted row alone, even when its conversation is live elsewhere', () => {
+    sessions.push(fakeSession({ key: 1, status: 'unstarted', ptyId: null, claudeSessionId: 'sid' }))
+    applyAgents([{ sessionId: 'sid', pid: 10, status: 'idle', cwd: 'D:\\elsewhere' }])
+    expect(sessions[0].status).toBe('unstarted')
+    expect(sessions[0].cwd).toBe('D:\\x')
+    expect(sessions[0].claudePid).toBe(null)
+  })
+
+  it('lastTitle keeps the spinner-free name and survives an empty title', () => {
+    sessions.push(fakeSession({ key: 1 }))
+    applyTitle(sessions[0], '✳ Fix the bug')
+    expect(sessions[0].lastTitle).toBe('Fix the bug')
+    applyTitle(sessions[0], '')
+    expect(sessions[0].lastTitle).toBe('Fix the bug')
+    expect(snapshotState().sessions[0].title).toBe('Fix the bug')
   })
 })
