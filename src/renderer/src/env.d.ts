@@ -17,7 +17,7 @@ interface PersistedState {
   // Hold the machine out of idle sleep while the app runs. Absent → true.
   keepAwake?: boolean
   // Which technique colours the status dot. Absent → 'screen', the default.
-  statusSource?: 'hooks' | 'screen'
+  statusSource?: 'hooks' | 'screen' | 'program'
   // How the tower's cards paint: how much colour the selected card's wash
   // carries, how much the rest carry, and which colour edge they wear. Absent →
   // 1 / 0 / 'none'. All three are validated on restore rather than trusted —

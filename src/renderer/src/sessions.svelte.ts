@@ -1,5 +1,6 @@
 import { DOT_COLORS, DEFAULT_FONT_ID, DEFAULT_UI_FONT_ID, type Mode } from './theme'
 import type { ScreenState } from './screen'
+import type { ProgramState } from './program'
 
 // The agent CLIs a row can be running, and what the UI may offer for each.
 // Mirrors the adapter table in src/main/cli/index.ts (the renderer can't import
@@ -27,6 +28,9 @@ export interface AgentTraits {
   preview: boolean
   info: boolean
   notes: boolean
+  // The one technique that can colour this agent's dot, or null when the
+  // Status detection setting picks (see dotTechnique).
+  statusTechnique: StatusSource | null
 }
 
 export const AGENTS: Record<AgentKind, AgentTraits> = {
@@ -39,7 +43,8 @@ export const AGENTS: Record<AgentKind, AgentTraits> = {
     titleIsConversationName: true,
     preview: true,
     info: true,
-    notes: true
+    notes: true,
+    statusTechnique: null
   },
   codex: {
     label: 'Codex',
@@ -53,7 +58,10 @@ export const AGENTS: Record<AgentKind, AgentTraits> = {
     // transcript for its numbers — none of which exist for codex. Left off
     // rather than shown mostly empty.
     info: false,
-    notes: true
+    notes: true,
+    // No hooks, no poll, and no OSC 7501 probe (unmeasured) — its title
+    // carries running, waiting and blocked, so the screen scan is all it has.
+    statusTechnique: 'screen'
   }
 }
 
@@ -63,6 +71,17 @@ export function isAgent(type: SessionType | undefined): type is AgentKind {
 
 export function traitsOf(type: SessionType): AgentTraits | null {
   return isAgent(type) ? AGENTS[type] : null
+}
+
+// WHICH TECHNIQUE PAINTS THIS ROW'S DOT — the one place the rule lives. One
+// technique at a time, deliberately: the others keep their bookkeeping and
+// stop painting, so a disagreement between them can never be something the
+// user has to untangle by eye. An agent with a single technique uses it
+// whatever the setting; Claude takes the setting; a shell has no agent state
+// for any of them to read.
+export function dotTechnique(session: Session): StatusSource | null {
+  const traits = traitsOf(session.type)
+  return traits ? (traits.statusTechnique ?? ui.statusSource) : null
 }
 
 // Read-only branch/worktree facts for the tower's repo→branch tree (issue #5),
@@ -140,6 +159,10 @@ export interface Session {
   // background shell, but while a turn is KNOWN to be open it corroborates
   // rather than guesses. See applyAgents.
   turnOpen: boolean
+  // The last root Program Status report (OSC 7501), kept whichever technique
+  // is selected — so switching to Program status paints from it at once
+  // (setStatusSource). Live runtime state, never persisted.
+  programState: ProgramState | null
   // Consecutive `idle` samples from the poll, counted since the turn opened
   // (UserPromptSubmit zeroes it). One is not evidence a turn ended — a single
   // transient idle mid-turn used to green the dot for the rest of that turn,
@@ -345,6 +368,11 @@ function touchRecent(cwd: string): void {
   if (recentDirs.length > RECENT_MAX) recentDirs.length = RECENT_MAX
 }
 
+// The Status detection setting's legal values — also what restore validates a
+// persisted one against.
+export const STATUS_SOURCE_IDS = ['hooks', 'screen', 'program'] as const
+export type StatusSource = (typeof STATUS_SOURCE_IDS)[number]
+
 export const ui = $state<{
   focused: number | null
   mode: Mode
@@ -368,9 +396,10 @@ export const ui = $state<{
   // WHICH TECHNIQUE COLOURS THE DOT. 'screen' is the default: the screen scan
   // (screen.ts), the same technique Codex rows have no choice but to use.
   // 'hooks' is the other one — turn-boundary hooks with the agent poll as a
-  // green floor. One technique at a time, deliberately, so a disagreement
+  // green floor. 'program' is Claude's own report over OSC 7501 (program.ts).
+  // One technique at a time, deliberately, so a disagreement
   // between them can never be something the user has to untangle by eye.
-  statusSource: 'hooks' | 'screen'
+  statusSource: StatusSource
   // HOW THE CARDS PAINT (2026-09-11), three independent knobs, all in Settings
   // because the right answer depends on the monitor and the number of cards on
   // it. `cardWash`/`cardWashRest` are how much of the group's colour
@@ -492,6 +521,7 @@ function createSession(init: {
     claudeStartedAt: null,
     subagentCount: 0,
     turnOpen: false,
+    programState: null,
     idleTicks: 0,
     statusSince: Date.now(),
     lastHook: null,
@@ -550,16 +580,15 @@ export function applyTitle(session: Session, title: string): void {
   if (clean) session.lastTitle = clean
 }
 
-// Status writes that belong to the DEFAULT technique. When the screen scan owns
-// the dot instead, the hooks and the poll keep every bit of their bookkeeping —
-// following a `/clear` to its new conversation id, adopting a spawned worktree's
-// cwd, tracking the claude pid, retaining the raw entry the Session tab reads —
-// and only stop painting. Two techniques writing one dot is the disagreement the
-// status rewrite spent three attempts removing; it is not coming back as a
-// setting.
+// Status writes that belong to the hooks technique. When another technique owns
+// the dot (dotTechnique), the hooks and the poll keep every bit of their
+// bookkeeping — following a `/clear` to its new conversation id, adopting a
+// spawned worktree's cwd, tracking the claude pid, retaining the raw entry the
+// Session tab reads — and only stop painting. Two techniques writing one dot is
+// the disagreement the status rewrite spent three attempts removing; it is not
+// coming back as a setting.
 function setStatusFromHooks(session: Session, next: Session['status']): void {
-  if (ui.statusSource !== 'hooks') return
-  setStatus(session, next)
+  if (dotTechnique(session) === 'hooks') setStatus(session, next)
 }
 
 // Codex mints its own conversation id and we learn it from the rollout it
@@ -581,12 +610,38 @@ export function applyDiscoveredSession(key: number, sessionId: string, name: str
 // The screen scan's verdict for one session (Terminal.svelte hands it over on a
 // debounce). Null never reaches here — the scanner drops "no opinion" so the dot
 // simply holds, which is how a TUI change degrades: a stale colour, not a wrong
-// one. An exited row is final, and a shell has no screen state to read.
+// one. An exited row is final.
 export function applyScreen(key: number, state: ScreenState): void {
-  if (ui.statusSource !== 'screen') return
   const session = sessions.find((s) => s.key === key)
-  if (!session || !isAgent(session.type) || session.status === 'exited') return
+  if (!session || session.status === 'exited' || dotTechnique(session) !== 'screen') return
   setStatus(session, state)
+}
+
+// A Program Status report (OSC 7501) — the program saying what it is doing,
+// root record only (program.ts). The probe is answered on every spawn, so
+// reports keep arriving whatever is selected: each is recorded, and paints
+// only where Program status owns the dot.
+export function applyProgram(key: number, state: ProgramState): void {
+  const session = sessions.find((s) => s.key === key)
+  if (!session || session.status === 'exited') return
+  session.programState = state
+  if (dotTechnique(session) === 'program') setStatus(session, state)
+}
+
+// The Settings pick. Selecting Program status must colour the tower straight
+// away, as Screen does — but an idle Claude sends no new report until its next
+// turn, so the last one each row received is applied on the switch.
+export function setStatusSource(source: StatusSource): void {
+  ui.statusSource = source
+  for (const session of sessions) {
+    if (
+      session.programState &&
+      session.status !== 'exited' &&
+      dotTechnique(session) === 'program'
+    ) {
+      setStatus(session, session.programState)
+    }
+  }
 }
 
 // Left-clicking the status dot toggles the TODO flag (both session types).
@@ -1128,7 +1183,7 @@ export async function restoreState(): Promise<void> {
   ui.statusDot = saved.statusDot ?? true
   ui.glyphColor = saved.glyphColor ?? true
   ui.keepAwake = saved.keepAwake ?? true
-  ui.statusSource = saved.statusSource ?? 'screen'
+  ui.statusSource = oneOf(saved.statusSource, STATUS_SOURCE_IDS, 'screen')
   // Clamped to the offered steps, not trusted: the state file is external data
   // and an arbitrary number would reach color-mix as-is. Each line names the
   // whole legal set — the chains this replaced named every value EXCEPT the

@@ -6,6 +6,7 @@
   import { ClipboardAddon } from '@xterm/addon-clipboard'
   import '@xterm/xterm/css/xterm.css'
   import { screenStatus, type ScreenState } from './screen'
+  import { isProbe, programState, PROBE_REPLY, type ProgramState } from './program'
 
   let {
     type = 'shell',
@@ -22,6 +23,7 @@
     onExited,
     onTitle,
     onScreen,
+    onProgram,
     onSession,
     onInput
   }: {
@@ -54,6 +56,10 @@
     // A screen-scan verdict. Only ever called with a state the scan is sure
     // of — "no opinion" is dropped here rather than travelling as a null.
     onScreen?: (state: ScreenState) => void
+    // A Program Status (OSC 7501) report the program made about itself. Same
+    // contract as onScreen: only a state it is sure of, never "no opinion".
+    // Fires whatever the setting — the store decides whether it paints.
+    onProgram?: (state: ProgramState) => void
     // Codex only: the conversation id, learned after the spawn, and the
     // conversation name once codex has picked one.
     onSession?: (sessionId: string, name: string | null) => void
@@ -269,6 +275,27 @@
     t.onTitleChange((title) => {
       lastTitle = title
       onTitle?.(title)
+    })
+
+    // OSC 7501, the Program Status Protocol (program.ts). xterm has no handler
+    // of its own, so before this it dropped the sequence; reading it rewrites
+    // nothing and puts nothing on screen that wasn't there.
+    //
+    // The probe is ANSWERED on every row, whatever the setting: a program asks
+    // once, at startup, so a reply gated on the setting would leave every row
+    // spawned before a switch silent for good. The reply is a terminal reply
+    // (blessed — CLAUDE.md), and it must leave in stream order: Claude puts a
+    // DA1 query right behind the probe and settles "no" if DA1's answer
+    // arrives first. term.input emits through onData, the same road xterm's
+    // own DA1 answer takes, and the parser reaches the probe first.
+    t.parser.registerOscHandler(7501, (payload) => {
+      if (isProbe(payload)) {
+        t.input(PROBE_REPLY, false)
+      } else {
+        const state = programState(payload)
+        if (state) onProgram?.(state)
+      }
+      return true
     })
 
     const offData = window.arc.pty.onData((id, data) => {

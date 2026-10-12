@@ -95,6 +95,10 @@
     relaunchSession,
     finishRelaunch,
     applyScreen,
+    applyProgram,
+    setStatusSource,
+    dotTechnique,
+    type StatusSource,
     renameSession,
     applySpawnCwd,
     applyPreviewItems,
@@ -416,17 +420,22 @@
     window.addEventListener('pointerup', up)
   }
 
-  // Which technique colours the status dot. One at a time — see screen.ts.
-  const STATUS_SOURCES = [
+  // Which technique colours the status dot. One at a time — see dotTechnique.
+  const STATUS_SOURCES: { id: StatusSource; label: string; hint: string }[] = [
     {
-      id: 'hooks' as const,
+      id: 'hooks',
       label: 'Hooks + poll',
       hint: 'Turn-boundary hooks decide red and amber; the agent poll is a green floor.'
     },
     {
-      id: 'screen' as const,
+      id: 'screen',
       label: 'Screen',
       hint: "Reads the session's own screen — the spinner, the prompt box, an open dialog."
+    },
+    {
+      id: 'program',
+      label: 'Program status',
+      hint: 'Claude reports its own state (OSC 7501, Claude Code 2.1.296+). Subagents still running read as red.'
     }
   ]
 
@@ -1434,9 +1443,9 @@
                 // session, so it must not paint the row exited on the way past.
                 if (!finishRelaunch(session.key)) setStatus(session, 'exited')
               }}
-              scanning={session.type === 'codex' ||
-                (ui.statusSource === 'screen' && session.type === 'claude')}
+              scanning={dotTechnique(session) === 'screen'}
               onScreen={(state) => applyScreen(session.key, state)}
+              onProgram={(state) => applyProgram(session.key, state)}
               onSession={(sessionId, name) => applyDiscoveredSession(session.key, sessionId, name)}
               onInput={(data) => nudgeStatusFromKey(session.key, data)}
               onTitle={(title) => applyTitle(session, title)}
@@ -2143,7 +2152,7 @@
             'Status detection',
             STATUS_SOURCES,
             ui.statusSource,
-            (id: (typeof STATUS_SOURCES)[number]['id']) => (ui.statusSource = id)
+            setStatusSource
           )}
           <!-- The hint the old rows hid in a title attribute. It changes with
                the choice, so it explains what is selected rather than making

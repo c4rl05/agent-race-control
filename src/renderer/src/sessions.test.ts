@@ -29,6 +29,8 @@ import {
   relaunchSession,
   finishRelaunch,
   applyScreen,
+  applyProgram,
+  setStatusSource,
   restoreState,
   snapshotState,
   startSession,
@@ -52,6 +54,7 @@ function fakeSession(overrides: Partial<Session>): Session {
     claudeStartedAt: null,
     subagentCount: 0,
     turnOpen: false,
+    programState: null,
     idleTicks: 0,
     statusSince: 0,
     lastHook: null,
@@ -1125,6 +1128,77 @@ describe('status source (which technique colours the dot)', () => {
     applyScreen(2, 'running')
     expect(sessions[0].status).toBe('running')
     expect(sessions[1].status).toBe('exited')
+  })
+
+  it('a codex row reads its screen whichever technique Claude rows use', () => {
+    for (const source of ['hooks', 'program'] as const) {
+      sessions.length = 0
+      ui.statusSource = source
+      sessions.push(fakeSession({ key: 1, type: 'codex', status: 'idle' }))
+      applyScreen(1, 'running')
+      expect(sessions[0].status).toBe('running')
+    }
+  })
+})
+
+describe('program status (OSC 7501)', () => {
+  it('paints a Claude row while it is the selected technique', () => {
+    ui.statusSource = 'program'
+    sessions.push(fakeSession({ key: 1, status: 'idle' }))
+    applyProgram(1, 'running')
+    expect(sessions[0].status).toBe('running')
+    applyProgram(1, 'waiting')
+    expect(sessions[0].status).toBe('waiting')
+  })
+
+  it('is recorded but never paints under the other two', () => {
+    for (const source of ['hooks', 'screen'] as const) {
+      sessions.length = 0
+      ui.statusSource = source
+      sessions.push(fakeSession({ key: 1, status: 'idle' }))
+      applyProgram(1, 'running')
+      expect(sessions[0].status).toBe('idle')
+      expect(sessions[0].programState).toBe('running')
+    }
+  })
+
+  it('the hooks, the poll and the screen all stop painting under it', () => {
+    ui.statusSource = 'program'
+    sessions.push(fakeSession({ key: 1, claudeSessionId: 'sid', status: 'idle' }))
+    applyHook('tok', 'sid', 'UserPromptSubmit')
+    applyScreen(1, 'waiting')
+    expect(sessions[0].status).toBe('idle')
+    applyProgram(1, 'running')
+    applyAgents([{ sessionId: 'sid', pid: 10, status: 'idle' }])
+    nudgeStatusFromKey(1, '\x03')
+    expect(sessions[0].status).toBe('running')
+  })
+
+  it('switching to it paints each row from its last report at once', () => {
+    sessions.push(
+      fakeSession({ key: 1, status: 'idle' }),
+      fakeSession({ key: 2, status: 'running' }),
+      fakeSession({ key: 3, status: 'exited' })
+    )
+    applyProgram(1, 'waiting') // recorded under hooks, not painted
+    sessions[2].programState = 'running'
+    expect(sessions[0].status).toBe('idle')
+    setStatusSource('program')
+    expect(sessions[0].status).toBe('waiting')
+    expect(sessions[1].status).toBe('running') // no report yet: the dot holds
+    expect(sessions[2].status).toBe('exited') // exited is final
+  })
+
+  it('shells and codex rows never take a report', () => {
+    ui.statusSource = 'program'
+    sessions.push(
+      fakeSession({ key: 1, type: 'shell', status: 'running' }),
+      fakeSession({ key: 2, type: 'codex', status: 'idle' })
+    )
+    applyProgram(1, 'waiting')
+    applyProgram(2, 'running')
+    expect(sessions[0].status).toBe('running')
+    expect(sessions[1].status).toBe('idle')
   })
 })
 
