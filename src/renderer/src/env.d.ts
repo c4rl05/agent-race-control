@@ -31,7 +31,10 @@ interface PersistedState {
   // Selected font ids (see theme.ts FONTS/UI_FONTS). Absent → the default.
   font?: string
   uiFont?: string
-  previewFont?: string
+  // The selected Preview theme's id, and the user's own themes. Absent →
+  // Today and none. The renderer validates both on restore (previewTheme.ts).
+  previewTheme?: string
+  previewThemes?: unknown[]
   towerWidth?: number
   focusedIndex: number
   dirOrder?: string[]

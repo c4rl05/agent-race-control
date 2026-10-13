@@ -126,9 +126,12 @@
     sessionTargetCwd,
     bumpPaneZoom,
     resetPaneZoom,
-    zoomFactor
+    zoomFactor,
+    activeTheme,
+    allThemes
   } from './sessions.svelte'
   import type { Session, WorktreeEntry, ZoomPane } from './sessions.svelte'
+  import ThemeEditor from './ThemeEditor.svelte'
   import { DOT_COLORS, FONTS, UI_FONTS, cardInk, chromeVars, fontStack } from './theme'
   import arcIconPng from './assets/arc.png?inline'
 
@@ -147,6 +150,9 @@
     | { kind: 'worktrees'; repoRoot: string; items: WorktreeEntry[]; x: number; y: number }
   let menu = $state<Menu | null>(null)
   let settingsOpen = $state(false)
+  // The Preview theme editor: a full-window overlay over everything, Settings
+  // included (opening it closes Settings).
+  let themeEditorOpen = $state(false)
 
   // Clamp y so no menu opens off the bottom edge — the per-menu copies of
   // this had drifted (spawn menus never clamped). height ≈ panel pixels.
@@ -553,10 +559,10 @@
   // see Terminal's font effect for the load-before-remeasure handling.
   const monoFont = $derived(fontStack(ui.font))
 
-  // The sans stacks (UI_FONTS): app chrome (--ui-font on .shell) and preview
-  // prose. Independent settings that happen to share the same font list.
+  // The sans stack (UI_FONTS) for the app chrome (--ui-font on .shell). The
+  // Preview's fonts are its theme's (previewTheme.ts).
   const chromeFont = $derived(fontStack(ui.uiFont, UI_FONTS))
-  const previewFont = $derived(fontStack(ui.previewFont, UI_FONTS))
+  const previewTheme = $derived(activeTheme())
 
   // Status-dot fills. Default: the Primer semantic tones (per theme). With the
   // Status RGB setting on: pure traffic-light RGB, identical in both themes.
@@ -1499,8 +1505,9 @@
                 sessionId={session.claudeSessionId}
                 cwd={session.cwd}
                 kind={session.type === 'codex' ? 'codex' : 'claude'}
-                proseFont={previewFont}
-                codeFont={monoFont}
+                look={previewTheme}
+                mode={effective}
+                terminalFont={monoFont}
               />
             {:else if session.claudeSessionId}
               <!-- unfocused, parked on its preview tab: nothing to render,
@@ -2044,6 +2051,14 @@
     </div>
   {/if}
 
+  {#if themeEditorOpen}
+    <ThemeEditor
+      mode={effective}
+      terminalFont={monoFont}
+      onclose={() => (themeEditorOpen = false)}
+    />
+  {/if}
+
   {#if settingsOpen}
     <!-- A settings PANEL, not a menu (2026-09-10). The controls are unchanged;
          what changed is that they stopped being twenty-three identical rows in
@@ -2179,13 +2194,57 @@
           <h2>Fonts</h2>
           {@render fontRow('Terminal', 'terminal', FONTS, ui.font, (id) => (ui.font = id))}
           {@render fontRow('Interface', 'interface', UI_FONTS, ui.uiFont, (id) => (ui.uiFont = id))}
-          {@render fontRow(
-            'Preview',
-            'preview',
-            UI_FONTS,
-            ui.previewFont,
-            (id) => (ui.previewFont = id)
-          )}
+        </section>
+
+        <!-- The Preview's look is a theme (kickoff doc, "Preview themes"): a
+             quick switch here, and everything else in the editor. -->
+        <section class="set-group">
+          <h2>Preview</h2>
+          <div class="set-row">
+            <span class="set-label">Theme</span>
+            <button
+              class="picker"
+              class:open={openFont === 'theme'}
+              aria-expanded={openFont === 'theme'}
+              aria-label={`Preview theme: ${previewTheme.name}`}
+              onclick={() => (openFont = openFont === 'theme' ? null : 'theme')}
+            >
+              <span class="picker-name">{previewTheme.name}</span>
+              <span class="material-symbols-outlined">expand_more</span>
+            </button>
+          </div>
+          {#if openFont === 'theme'}
+            <div class="options" role="radiogroup" aria-label="Preview theme">
+              {#each allThemes() as theme (theme.id)}
+                <button
+                  class="option"
+                  class:on={previewTheme.id === theme.id}
+                  role="radio"
+                  aria-checked={previewTheme.id === theme.id}
+                  style:font-family={`'${theme.type.body}', system-ui, sans-serif`}
+                  onclick={() => {
+                    ui.previewTheme = theme.id
+                    openFont = null
+                  }}
+                >
+                  {theme.name}
+                </button>
+              {/each}
+            </div>
+          {/if}
+          <div class="set-row">
+            <span class="set-label">Customize</span>
+            <button
+              class="picker"
+              onclick={() => {
+                settingsOpen = false
+                themeEditorOpen = true
+              }}
+            >
+              <span class="picker-name">Open the theme editor</span>
+              <span class="material-symbols-outlined">palette</span>
+            </button>
+          </div>
         </section>
       </div>
     </div>
@@ -2198,7 +2257,8 @@
       // An open font picker is the innermost thing Escape can mean, so it goes
       // first — one Escape shouldn't close the panel out from under a list you
       // were still reading.
-      if (openFont) openFont = null
+      if (themeEditorOpen) themeEditorOpen = false
+      else if (openFont) openFont = null
       else if (settingsOpen) settingsOpen = false
       else if (menu) menu = null
     }

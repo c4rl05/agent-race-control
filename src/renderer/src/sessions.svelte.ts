@@ -1,6 +1,14 @@
 import { DOT_COLORS, DEFAULT_FONT_ID, DEFAULT_UI_FONT_ID, type Mode } from './theme'
 import type { ScreenState } from './screen'
 import type { ProgramState } from './program'
+import {
+  BUILTIN_THEMES,
+  TODAY_ID,
+  copyTheme,
+  normalizeThemes,
+  uniqueName,
+  type PreviewTheme
+} from './previewTheme'
 
 // The agent CLIs a row can be running, and what the UI may offer for each.
 // Mirrors the adapter table in src/main/cli/index.ts (the renderer can't import
@@ -423,11 +431,12 @@ export const ui = $state<{
   // construction (the borrowed palette IS the current one), so the flag is only
   // consulted while the effective theme is light. On by default.
   cardDark: boolean
-  // Selected font ids: terminal (mono, theme.ts FONTS), interface/app chrome
-  // and preview prose (both sans, theme.ts UI_FONTS).
+  // Selected font ids: terminal (mono, theme.ts FONTS) and interface/app
+  // chrome (sans, theme.ts UI_FONTS). The Preview's fonts are its theme's.
   font: string
   uiFont: string
-  previewFont: string
+  // The selected Preview theme: a built-in's id or one of previewThemes'.
+  previewTheme: string
 }>({
   focused: null,
   mode: 'dark',
@@ -443,8 +452,68 @@ export const ui = $state<{
   cardDark: true,
   font: DEFAULT_FONT_ID,
   uiFont: DEFAULT_UI_FONT_ID,
-  previewFont: DEFAULT_UI_FONT_ID
+  previewTheme: TODAY_ID
 })
+
+// ---- Preview themes (kickoff doc, "Preview themes") ----
+// The user's own themes. The built-ins are read-only and live in
+// previewTheme.ts; editing one forks it into this list first.
+export const previewThemes = $state<PreviewTheme[]>([])
+
+export function allThemes(): PreviewTheme[] {
+  return [...BUILTIN_THEMES, ...previewThemes]
+}
+
+// The selected theme — Today when the id names nothing (a deleted theme, a
+// hand-edited file).
+export function activeTheme(): PreviewTheme {
+  return allThemes().find((t) => t.id === ui.previewTheme) ?? BUILTIN_THEMES[0]
+}
+
+export function newThemeId(): string {
+  return `user-${crypto.randomUUID()}`
+}
+
+export const themeNames = (): string[] => allThemes().map((t) => t.name)
+
+// A user copy of `id`'s look, selected. Returns it.
+export function duplicateTheme(id: string, name?: string): PreviewTheme {
+  const source = allThemes().find((t) => t.id === id) ?? activeTheme()
+  previewThemes.push(
+    copyTheme(source, newThemeId(), uniqueName(name ?? `${source.name} copy`, themeNames()))
+  )
+  const copy = previewThemes[previewThemes.length - 1]
+  ui.previewTheme = copy.id
+  return copy
+}
+
+// The selected theme as something an edit can write to: the user theme
+// itself, or — when a built-in is selected — a fresh copy of it, selected in
+// its place. Editing never changes a built-in.
+export function editableTheme(): PreviewTheme {
+  const current = activeTheme()
+  return current.builtin ? duplicateTheme(current.id) : current
+}
+
+export function renameTheme(id: string, name: string): void {
+  const theme = previewThemes.find((t) => t.id === id)
+  const trimmed = name.trim()
+  if (!theme || !trimmed || trimmed === theme.name) return
+  theme.name = uniqueName(trimmed, themeNames())
+}
+
+// Deleting the selected theme selects Today.
+export function deleteTheme(id: string): void {
+  const index = previewThemes.findIndex((t) => t.id === id)
+  if (index < 0) return
+  previewThemes.splice(index, 1)
+  if (ui.previewTheme === id) ui.previewTheme = TODAY_ID
+}
+
+export function addTheme(theme: PreviewTheme): void {
+  previewThemes.push(theme)
+  ui.previewTheme = theme.id
+}
 
 // Claude Code's animated title spinner: the asterisk churn (✳ ✶ ✻ …) it
 // originally used PLUS the braille frames (⠀-⣿) newer builds also cycle
@@ -1194,7 +1263,10 @@ export async function restoreState(): Promise<void> {
   ui.cardDark = saved.cardDark ?? true
   ui.font = saved.font ?? DEFAULT_FONT_ID
   ui.uiFont = saved.uiFont ?? DEFAULT_UI_FONT_ID
-  ui.previewFont = saved.previewFont ?? DEFAULT_UI_FONT_ID
+  // Validated, not trusted: these values end up inside CSS (previewTheme.ts).
+  previewThemes.push(...normalizeThemes(saved.previewThemes))
+  ui.previewTheme = typeof saved.previewTheme === 'string' ? saved.previewTheme : TODAY_ID
+  if (activeTheme().id !== ui.previewTheme) ui.previewTheme = TODAY_ID
   if (saved.dirOrder?.length) dirOrder.push(...saved.dirOrder)
   if (saved.dirColors) Object.assign(dirColors, saved.dirColors)
   if (saved.collapsed) for (const key of saved.collapsed) collapsedGroups[key] = true
@@ -1276,7 +1348,9 @@ export function snapshotState(): PersistedState {
     cardDark: ui.cardDark,
     font: ui.font,
     uiFont: ui.uiFont,
-    previewFont: ui.previewFont,
+    previewTheme: ui.previewTheme,
+    // Only when there are any — most files never carry one.
+    previewThemes: previewThemes.length ? $state.snapshot(previewThemes) : undefined,
     towerWidth: ui.towerWidth,
     focusedIndex,
     dirOrder: dirOrder.filter((dir) => alive.some((s) => s.cwd === dir)),

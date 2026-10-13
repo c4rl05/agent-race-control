@@ -36,7 +36,10 @@ export interface AppState {
   // Selected font ids (see the renderer's FONTS/UI_FONTS). Absent → the default.
   font?: string
   uiFont?: string
-  previewFont?: string
+  // The selected Preview theme's id, and the user's own themes. Absent →
+  // Today and none. The renderer validates both on restore (previewTheme.ts).
+  previewTheme?: string
+  previewThemes?: unknown[]
   towerWidth?: number
   // Window zoom level (Ctrl+=/−/0), owned by main. The renderer's per-pane
   // offsets ride alongside it under `paneZoom`, in HALF levels, and are reset

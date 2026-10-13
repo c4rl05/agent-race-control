@@ -35,8 +35,15 @@ import {
   snapshotState,
   startSession,
   applyTitle,
-  ui
+  ui,
+  previewThemes,
+  activeTheme,
+  editableTheme,
+  duplicateTheme,
+  renameTheme,
+  deleteTheme
 } from './sessions.svelte'
+import { TODAY_ID } from './previewTheme'
 
 function fakeSession(overrides: Partial<Session>): Session {
   return {
@@ -1279,5 +1286,67 @@ describe('lazy start', () => {
     applyTitle(sessions[0], '')
     expect(sessions[0].lastTitle).toBe('Fix the bug')
     expect(snapshotState().sessions[0].title).toBe('Fix the bug')
+  })
+})
+
+describe('preview themes', () => {
+  beforeEach(() => {
+    previewThemes.length = 0
+    ui.previewTheme = TODAY_ID
+  })
+
+  it('an unknown selection reads as Today', () => {
+    ui.previewTheme = 'gone'
+    expect(activeTheme().id).toBe(TODAY_ID)
+  })
+
+  it('editing a built-in forks it into a selected user copy, leaving the built-in alone', () => {
+    ui.previewTheme = 'editorial'
+    const target = editableTheme()
+    target.type.size = 19
+    expect(target.builtin).toBeUndefined()
+    expect(target.name).toBe('Editorial copy')
+    expect(ui.previewTheme).toBe(target.id)
+    expect(previewThemes).toHaveLength(1)
+    ui.previewTheme = 'editorial'
+    expect(activeTheme().type.size).toBe(15)
+  })
+
+  it('editing a user theme edits it in place', () => {
+    const mine = duplicateTheme(TODAY_ID, 'Mine')
+    expect(editableTheme()).toBe(mine)
+    expect(previewThemes).toHaveLength(1)
+  })
+
+  it('duplicates take a free name', () => {
+    duplicateTheme('editorial')
+    duplicateTheme('editorial')
+    expect(previewThemes.map((t) => t.name)).toEqual(['Editorial copy', 'Editorial copy 2'])
+  })
+
+  it('renames to a free, trimmed name and ignores blanks and built-ins', () => {
+    const a = duplicateTheme(TODAY_ID, 'A')
+    duplicateTheme(TODAY_ID, 'B')
+    renameTheme(a.id, '  B  ')
+    expect(previewThemes[0].name).toBe('B 2')
+    renameTheme(a.id, '   ')
+    expect(previewThemes[0].name).toBe('B 2')
+    renameTheme('editorial', 'Hacked')
+    expect(activeTheme().name).toBe('B')
+  })
+
+  it('deleting the selected theme falls back to Today', () => {
+    const a = duplicateTheme(TODAY_ID, 'A')
+    deleteTheme(a.id)
+    expect(previewThemes).toHaveLength(0)
+    expect(ui.previewTheme).toBe(TODAY_ID)
+  })
+
+  it('persists the selection, and the user themes only when there are any', () => {
+    expect(snapshotState().previewThemes).toBeUndefined()
+    const a = duplicateTheme('geist', 'Mine')
+    const snap = snapshotState()
+    expect(snap.previewTheme).toBe(a.id)
+    expect(snap.previewThemes).toHaveLength(1)
   })
 })

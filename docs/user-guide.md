@@ -193,6 +193,15 @@ A file that was written or edited arrives as a **tab carrying its name**, folded
 
 Pure observation: nothing is injected, the terminal byte stream is untouched, and flipping between Terminal and Preview is instant.
 
+**Themes.** How the Preview reads is a theme: Settings → Preview → **Theme** switches between them, and **Open the theme editor** opens the editor over the whole window. It has four tabs:
+
+- **Themes** lists the built-in themes and your own. Duplicate, rename and delete your own; **Export** copies the selected theme to the clipboard and **Import** adds one from it.
+- **Type** sets the background, then the font, weight, size and colour of the body, headings, bold text, links and code, plus line height, line length and spacing.
+- **Prompts** picks how your own prompts stand out (bar, bubble, margin label, heading, chevron and more), with their accent colour, tint and font.
+- **Code** picks a syntax colour theme for code blocks and diffs, with a dark and a light variant each, plus line numbers and corners.
+
+The sample on the right is rendered exactly as the Preview renders, and **Hold to compare with Today** shows the old look while you hold it. Built-in themes never change: the first edit to one makes your own copy and selects it. **Today** is the default, and is the Preview as it looked before themes.
+
 ### Session
 
 Everything the app knows about a running Claude session, as read-only labelled text: pid and working directory, the model and effort driving it, context and output tokens, turns and how long the last one took, compactions, queued prompts, subagents and background shells it started, which hooks ran and how slow they were, and Claude's own written summary of where it got to.
@@ -229,7 +238,7 @@ The ☰ button opens Settings — one panel, three sections, closed with the ×,
 
 **Fonts**
 
-Three pickers — the terminal's monospace face (Cascadia Mono, Consolas, JetBrains Mono, Fira Code, IBM Plex Mono) and the sans faces for the app chrome and the preview. Each picker shows the face **in that face**, and unfolds to the whole list with every name likewise set in itself, so you're choosing by how it reads rather than by its name. Only one list is open at a time.
+Two pickers — the terminal's monospace face (Cascadia Mono, Consolas, JetBrains Mono, Fira Code, IBM Plex Mono) and the sans face for the app chrome. The Preview's fonts belong to its theme (see *Preview*). Each picker shows the face **in that face**, and unfolds to the whole list with every name likewise set in itself, so you're choosing by how it reads rather than by its name. Only one list is open at a time.
 
 **Zoom** works two ways. `Ctrl+=` / `Ctrl+-` / `Ctrl+0` size the **whole window**, Windows-Terminal style. `Ctrl+wheel` over a pane sizes **just that pane** — the tower, the terminal, the Preview tab, the Session tab and the Notes tab each remember their own size, so you can read a transcript large while the tower stays small. The wheel moves in finer steps than the keys, two notches to each keypress, and reaches just as far either way. The terminal's share is a real font-size change: the grid reflows and the session is resized, exactly as in Windows Terminal. Pressing one of the window-zoom keys puts every pane back in step with the window.
 
