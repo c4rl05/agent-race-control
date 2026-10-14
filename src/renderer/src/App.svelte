@@ -147,6 +147,8 @@
   // session: right-click a session row. worktrees: the repo card's reopen
   // menu — parked worktrees fetched on click, items carried in the menu.
   // edit: right-click any text field. preview: right-click the Preview.
+  // update: the tower's Update ready button — a menu, so one stray click can
+  // never restart the app out from under its agents.
   type Menu =
     | { kind: 'spawn'; type: SessionType; x: number; y: number }
     | { kind: 'color'; dir: string; x: number; y: number }
@@ -155,6 +157,7 @@
     | { kind: 'worktrees'; repoRoot: string; items: WorktreeEntry[]; x: number; y: number }
     | { kind: 'edit'; field: TextField; x: number; y: number }
     | { kind: 'preview'; root: HTMLElement; text: string; x: number; y: number }
+    | { kind: 'update'; x: number; y: number }
   let menu = $state<Menu | null>(null)
 
   // The edit menu every text field gets on right-click (2026-10-14): Electron
@@ -624,6 +627,24 @@
   $effect(() => {
     const on = ui.keepAwake
     if (restored) window.arc.setKeepAwake(on)
+  })
+
+  // Auto-update (main/updater.ts). The setting goes to main only after
+  // restore, as Keep awake does, so a saved OFF never checks even once at boot.
+  // `updateReady` is the version a downloaded update would restart into; main
+  // also answers it on `info`, so a renderer reload keeps the button.
+  let updateInfo = $state<{ version: string; supported: boolean } | null>(null)
+  let updateReady = $state<string | null>(null)
+  $effect(() => {
+    void window.arc.update.info().then((info) => {
+      updateInfo = info
+      if (info.ready) updateReady = info.ready
+    })
+    return window.arc.update.onReady((version) => (updateReady = version))
+  })
+  $effect(() => {
+    const on = ui.autoUpdate
+    if (restored) window.arc.update.setEnabled(on)
   })
 
   const effective = $derived(ui.mode === 'system' ? (systemDark ? 'dark' : 'light') : ui.mode)
@@ -1266,6 +1287,19 @@
           <span class="material-symbols-outlined caret">expand_more</span>
         </button>
       </div>
+      {#if updateReady}
+        <button
+          class="icon-btn update-btn"
+          title={`Update ${updateReady} is ready`}
+          aria-label={`Update ${updateReady} is ready`}
+          onclick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            openMenu({ kind: 'update', x: rect.left, y: rect.bottom + 4 }, 110)
+          }}
+        >
+          <span class="material-symbols-outlined">upgrade</span>
+        </button>
+      {/if}
       <button
         class="icon-btn"
         title="Settings"
@@ -2099,6 +2133,21 @@
           <span class="material-symbols-outlined">search</span>Find…
           <span class="menu-key">{MOD}F</span>
         </button>
+      {:else if menu.kind === 'update'}
+        <div class="menu-label">Update {updateReady} is ready</div>
+        <button
+          class="menu-item"
+          onclick={() => {
+            menu = null
+            window.arc.update.install()
+          }}
+        >
+          <span class="material-symbols-outlined">restart_alt</span>Restart now
+        </button>
+        <p class="menu-note">
+          Every session restarts too, and picks up its conversation when you select it. Or carry on:
+          the update installs when you next quit.
+        </p>
       {:else if menu.kind === 'color'}
         {#each DOT_COLORS as entry (entry.name)}
           <button
@@ -2347,6 +2396,24 @@
           <p class="set-hint">
             While the app is open the machine won't idle-sleep, so agents keep working. The screen
             still turns off, and sleeping it yourself still works.
+          </p>
+          <div class="set-row">
+            <span class="set-label">Update automatically</span>
+            {@render switchBtn(
+              'Update automatically',
+              ui.autoUpdate,
+              () => (ui.autoUpdate = !ui.autoUpdate)
+            )}
+          </div>
+          <p class="set-hint">
+            {#if updateInfo && !updateInfo.supported}
+              Version {updateInfo.version}. Only the installed app updates itself; this build
+              doesn't.
+            {:else}
+              Version {updateInfo?.version ?? ''}. New versions download in the background and
+              install when you quit, or when you restart from the update button in the tower. The
+              app never restarts on its own.
+            {/if}
           </p>
         </section>
 
@@ -3820,6 +3887,23 @@
     height: 1px;
     margin: 4px 0;
     background: var(--border);
+  }
+
+  /* A sentence under a menu's action — the update menu's, saying what a
+     restart costs before you click it. */
+  .menu-note {
+    max-width: 240px;
+    margin: 4px 0 2px;
+    padding: 0 8px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--fg-muted);
+  }
+
+  /* The update button wears the accent: the one header control that is news. */
+  .update-btn {
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
   .menu-label {

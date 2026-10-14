@@ -33,6 +33,9 @@ export interface AppState {
   glyphColor?: boolean
   // Hold the machine out of idle sleep while the app runs (awake.ts). Absent → true.
   keepAwake?: boolean
+  // Find, download and stage updates from GitHub Releases (updater.ts).
+  // Absent → true.
+  autoUpdate?: boolean
   // Legacy font ids, read once by the renderer to move them into the selected
   // theme and never written since (2026-10-14).
   font?: string

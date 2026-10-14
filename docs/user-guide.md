@@ -251,6 +251,7 @@ The ☰ button opens Settings — one panel, four sections, closed with the ×, 
 **Power**
 
 - **Keep awake** — while the app is open the machine won't idle-sleep, so agents keep working. The screen still turns off.
+- **Update automatically** — the installed app checks GitHub for a new version at launch and every 6 hours, and downloads it in the background. Then an **update button** (an up arrow, in the accent colour) appears beside ☰: **Restart now** applies it — every session restarts too and picks its conversation back up when you select it — or carry on, and it installs when you next quit. The app never restarts on its own. The line under the switch shows the version you're running. The Portable build doesn't update itself.
 
 **Theme**
 

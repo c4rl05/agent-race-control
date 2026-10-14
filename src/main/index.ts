@@ -10,6 +10,7 @@ import { loadState, saveState, flushState } from './state'
 import type { AppState } from './state'
 import { getGitInfo, listWorktrees } from './git'
 import { setKeepAwake } from './awake'
+import { registerUpdaterHandlers } from './updater'
 
 // Blessed dev-only deviation (screenshot harness, see the kickoff doc): a
 // scratch profile so staged runs never touch the real tower. Must be set
@@ -298,6 +299,9 @@ if (!gotLock) {
       })
       registerPtyHandlers(() => win?.webContents ?? null)
       registerTranscriptHandlers(() => win?.webContents ?? null)
+      // Installed builds only, and only once the renderer sends the setting
+      // (see updater.ts).
+      registerUpdaterHandlers(() => win?.webContents ?? null)
       // Pull-only, and only while the Session tab is open (see sessioninfo.ts).
       registerSessionInfoHandlers()
       // One `claude agents --json` per tick for the whole tower, and only while a

@@ -57,8 +57,8 @@ Mode, theme and the status controls live in one Settings panel, grouped into App
 
 Grab the [latest release](https://github.com/C4RL05/agent-race-control/releases/latest):
 
-- **Setup** (`Agent Race Control Setup <version>.exe`) — NSIS one-click, per-user installer: no admin prompt, Start Menu entry, real uninstaller. Recommended.
-- **Portable** (`Agent Race Control Portable <version>.exe`) — a no-install download: self-extracts and runs, leaving no installed footprint.
+- **Setup** (`Agent-Race-Control-Setup-<version>.exe`) — NSIS one-click, per-user installer: no admin prompt, Start Menu entry, real uninstaller, and **auto-update** (from 0.1.8): new versions download in the background and install when you quit, or when you restart from the tower's update button — the app never restarts on its own. Recommended.
+- **Portable** (`Agent Race Control Portable <version>.exe`) — a no-install download: self-extracts and runs, leaving no installed footprint. It doesn't update itself.
 
 Both are unsigned — expect a SmartScreen warning on first run (More info → Run anyway).
 

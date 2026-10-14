@@ -26,6 +26,12 @@ win:
 nsis:
   oneClick: true
   perMachine: false
+  # Space-free, because auto-update fetches the Setup by the name latest.yml
+  # gives it, and GitHub stores an uploaded asset with its spaces turned into
+  # dots: with the default name, 0.1.7's manifest pointed at a file that
+  # didn't exist. Each release uploads this exe, its .blockmap and latest.yml
+  # (kickoff doc, *Auto-update*).
+  artifactName: Agent-Race-Control-Setup-${version}.${ext}
 # Portable self-extracts to %TEMP% each launch and runs from there. node-pty's
 # unpacked prebuilds land in that temp dir as real files, so ConPTY spawning
 # works — but it's the reason the doc originally rejected portable; keep it

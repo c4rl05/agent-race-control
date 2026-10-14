@@ -16,6 +16,8 @@ interface PersistedState {
   glyphColor?: boolean
   // Hold the machine out of idle sleep while the app runs. Absent → true.
   keepAwake?: boolean
+  // Auto-update from GitHub Releases (installed builds only). Absent → true.
+  autoUpdate?: boolean
   // Which technique colours the status dot. Absent → 'screen', the default.
   statusSource?: 'hooks' | 'screen' | 'program'
   // How the tower's cards paint: how much colour the selected card's wash
@@ -181,6 +183,12 @@ interface Window {
     getPathForFile: (file: File) => string
     setAppIcon: (representations: Array<{ scaleFactor: number; dataURL: string }>) => void
     setKeepAwake: (on: boolean) => void
+    update: {
+      info: () => Promise<{ version: string; supported: boolean; ready: string | null }>
+      setEnabled: (on: boolean) => void
+      install: () => void
+      onReady: (callback: (version: string) => void) => () => void
+    }
     state: {
       load: () => Promise<PersistedState | null>
       save: (state: PersistedState) => void

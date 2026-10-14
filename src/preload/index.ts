@@ -26,6 +26,23 @@ contextBridge.exposeInMainWorld('arc', {
   setKeepAwake: (on: boolean): void => {
     ipcRenderer.send('power:keepAwake', on)
   },
+  // Auto-update (main/updater.ts): the setting, the facts the Settings hint
+  // shows, the staged update's announcement, and the user's restart into it.
+  update: {
+    info: (): Promise<{ version: string; supported: boolean; ready: string | null }> =>
+      ipcRenderer.invoke('update:info'),
+    setEnabled: (on: boolean): void => {
+      ipcRenderer.send('update:enabled', on)
+    },
+    install: (): void => {
+      ipcRenderer.send('update:install')
+    },
+    onReady: (callback: (version: string) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, version: string): void => callback(version)
+      ipcRenderer.on('update:ready', listener)
+      return () => ipcRenderer.removeListener('update:ready', listener)
+    }
+  },
   state: {
     load: (): Promise<unknown> => ipcRenderer.invoke('state:load'),
     save: (state: unknown): void => {

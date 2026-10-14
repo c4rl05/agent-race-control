@@ -1292,6 +1292,9 @@ describe('lazy start', () => {
     expect(sessions[1].claudeSessionId).toBe('x1')
     expect(sessions[2].claudeSessionId).toBe(null)
     expect(ui.focused).toBe(sessions[1].key)
+    // A file from before auto-update existed reads as ON, and saves it.
+    expect(ui.autoUpdate).toBe(true)
+    expect(snapshotState().autoUpdate).toBe(true)
   })
 
   it('starting goes live without clearing the TODO flag', () => {
