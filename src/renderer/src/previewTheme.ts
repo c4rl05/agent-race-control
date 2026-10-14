@@ -4,6 +4,8 @@
 // theme becomes. The store holds which theme is selected and the user's own;
 // Conversation.svelte owns the CSS that reads these properties.
 
+import { FONTS, UI_FONTS, fontStack as pickerStack } from './theme'
+
 export type FontKind = 'serif' | 'sans' | 'mono'
 
 // Every family a theme can name. All but the `native` four are self-hosted
@@ -537,10 +539,24 @@ export interface ThemeCode {
   diff: number
   lineNums: boolean
 }
+// The rest of the app (phase 2's first slice, 2026-10-14): the terminal's
+// font and the chrome's, which were Settings → Fonts until the theme took them
+// over. Each is one of the five its old picker offered (theme.ts FONTS /
+// UI_FONTS), by label, never the whole catalogue: the terminal is a cell grid
+// xterm measures, and those five are the faces verified to draw it (static
+// 400/700 cuts, box-drawing left to xterm — the kickoff doc's font item).
+export interface ThemeApp {
+  terminal: string
+  ui: string
+}
+export const TERMINAL_FONTS = FONTS.map((f) => f.label)
+export const UI_FONT_NAMES = UI_FONTS.map((f) => f.label)
+
 export interface Look {
   type: ThemeType
   prompt: ThemePrompt
   code: ThemeCode
+  app: ThemeApp
 }
 export interface PreviewTheme extends Look {
   id: string
@@ -616,10 +632,15 @@ export const TODAY: Look = {
     color: '',
     italic: false
   },
-  code: { theme: 'plain', bg: 'theme', radius: 6, diff: 15, lineNums: false }
+  code: { theme: 'plain', bg: 'theme', radius: 6, diff: 15, lineNums: false },
+  // The two pickers' old defaults.
+  app: { terminal: FONTS[0].label, ui: UI_FONTS[0].label }
 }
 
-// A built-in: a pairing (playground-tuned type), a prompt treatment, a code theme.
+// A built-in: a pairing (playground-tuned type), a prompt treatment, a code
+// theme — and the app fonts that follow from the pairing: its code font in the
+// terminal and its body font in the chrome, where each is one the terminal or
+// the chrome can take, else Today's.
 function builtin(
   id: string,
   name: string,
@@ -633,7 +654,11 @@ function builtin(
     builtin: true,
     type: { ...TODAY.type, inline: 'chip', fullStrong: true, ...type },
     prompt: { ...TODAY.prompt, style, tint: PROMPT_TINTS[style] ?? 10 },
-    code: { theme, bg: 'theme', radius: 8, diff: 16, lineNums: false }
+    code: { theme, bg: 'theme', radius: 8, diff: 16, lineNums: false },
+    app: {
+      terminal: type.code && TERMINAL_FONTS.includes(type.code) ? type.code : TODAY.app.terminal,
+      ui: type.body && UI_FONT_NAMES.includes(type.body) ? type.body : TODAY.app.ui
+    }
   }
 }
 
@@ -1098,6 +1123,7 @@ export function normalizeLook(raw: unknown): Look {
   const t = record(r.type)
   const p = record(r.prompt)
   const k = record(r.code)
+  const a = record(r.app)
   const d = TODAY
   const R = TYPE_RANGES
   return {
@@ -1149,6 +1175,11 @@ export function normalizeLook(raw: unknown): Look {
       radius: num(k.radius, CODE_RANGES.radius, d.code.radius),
       diff: num(k.diff, CODE_RANGES.diff, d.code.diff),
       lineNums: bool(k.lineNums, d.code.lineNums)
+    },
+    // A theme from before the section existed gets Today's, like any section.
+    app: {
+      terminal: pick(a.terminal, TERMINAL_FONTS, d.app.terminal),
+      ui: pick(a.ui, UI_FONT_NAMES, d.app.ui)
     }
   }
 }
@@ -1195,8 +1226,8 @@ export function copyTheme(source: Look, id: string, name: string): PreviewTheme 
 // What export writes: the look and its name, never the id (an import gets a
 // fresh one, so importing the same theme twice can't collide).
 export function exportTheme(theme: PreviewTheme): string {
-  const { name, type, prompt, code } = theme
-  return JSON.stringify({ arcPreviewTheme: 1, name, type, prompt, code }, null, 2)
+  const { name, type, prompt, code, app } = theme
+  return JSON.stringify({ arcPreviewTheme: 1, name, type, prompt, code, app }, null, 2)
 }
 
 // The clipboard's text as a theme, or null. Accepts exactly what exportTheme writes.
@@ -1218,6 +1249,16 @@ export function importTheme(
 }
 
 // ------------------------------------------------------------------ CSS
+
+// The app's two font stacks, as the old pickers built them (theme.ts) — so a
+// theme's terminal font is exactly the stack the picker of the same name gave.
+export function terminalStack(look: Look): string {
+  return pickerStack(FONTS.find((f) => f.label === look.app.terminal)?.id ?? '', FONTS)
+}
+
+export function uiStack(look: Look): string {
+  return pickerStack(UI_FONTS.find((f) => f.label === look.app.ui)?.id ?? '', UI_FONTS)
+}
 
 export function promptFontName(look: Look): string {
   const { font } = look.prompt

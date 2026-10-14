@@ -28,7 +28,9 @@ interface PersistedState {
   // Light mode only: paint the selected card with the DARK palette's ground and
   // text. Absent → true.
   cardDark?: boolean
-  // Selected font ids (see theme.ts FONTS/UI_FONTS). Absent → the default.
+  // Legacy font ids (theme.ts FONTS/UI_FONTS): read once to move them into the
+  // selected theme (sessions.svelte.ts, migrateFonts), never written since the
+  // theme took the fonts over (2026-10-14).
   font?: string
   uiFont?: string
   // The selected Preview theme's id, and the user's own themes. Absent →
@@ -78,7 +80,11 @@ interface PersistedState {
 // src/main/transcript.ts (the exported source of truth, which preload
 // imports directly): the renderer program deliberately excludes node types,
 // so it cannot import from main — keep this copy in sync by hand.
-type PreviewItem = { kind: 'user'; text: string } | { kind: 'assistant'; text: string }
+type PreviewItem =
+  | { kind: 'user'; text: string }
+  | { kind: 'assistant'; text: string }
+  | { kind: 'compact'; trigger: string; tokens: number }
+  | { kind: 'summary'; text: string }
 
 // Read-only git info for the tower's repo→branch tree — hand-copied from
 // src/main/git.ts (GitInfo), same can't-import-from-main reason as PreviewItem.

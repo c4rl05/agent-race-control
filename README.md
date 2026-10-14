@@ -31,7 +31,7 @@ Built on a hard rule: the **unmodified CLI in a real pseudo-terminal** (node-pty
 - **Repo cards & worktrees** — a git repo's worktrees gather under one card, one branch row each; the card spawns a Claude straight into a **fresh worktree** (`claude --worktree`) for parallel features — Claude Code creates it, installs nothing, and cleans it up on exit; the app never touches git
 - **Filter bar** — text search over name/title/path, plus Claude/shell type chips
 - **Directory colors** pushed *into* Claude Code on demand: "Apply folder color" types `/color <name>` for you, so agent view matches the tower
-- **GitHub Light/Dark/System** theming (exact Primer palettes), interface/terminal/preview font pickers, and the status-dot toggles, together in one Settings modal — the app's chrome only; the CLI renders untouched
+- **GitHub Light/Dark/System** theming (exact Primer palettes), themes that set the Preview's look and the terminal and interface fonts, and the status-dot toggles, together in one Settings modal — the app's chrome only; the CLI renders untouched
 - **Windows Terminal conventions** — Ctrl+Shift+C/V copy/paste, right-click copy/paste, file drop pastes the quoted path, Ctrl+=/−/0 window zoom plus Ctrl+wheel to zoom one pane. Zero new muscle memory, nothing shadowed.
 - **Right-click context menu** — Show in Explorer, copy path, duplicate session, rename, apply folder color, relaunch, archive, close
 
@@ -46,7 +46,7 @@ Every agent row carries a **read-only conversation preview**, rendered as markdo
 
 ## Appearance
 
-Theme, fonts and the status controls live in one Settings panel, grouped into Appearance, Status and Fonts: GitHub Light/Dark/System, whether the status dot is drawn at all and which technique colours it on Claude rows, and independent font pickers for the interface, the terminal and the preview — each showing every face in that face.
+Mode, theme and the status controls live in one Settings panel, grouped into Appearance, Status, Power and Theme: GitHub Light/Dark/System, whether the status dot is drawn at all and which technique colours it on Claude rows, and the theme — the Preview's typography, prompt style and code colours, plus the terminal and interface fonts — with a full-window editor for making your own.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/arc-settings-dark.png">

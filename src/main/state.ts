@@ -33,7 +33,8 @@ export interface AppState {
   glyphColor?: boolean
   // Hold the machine out of idle sleep while the app runs (awake.ts). Absent → true.
   keepAwake?: boolean
-  // Selected font ids (see the renderer's FONTS/UI_FONTS). Absent → the default.
+  // Legacy font ids, read once by the renderer to move them into the selected
+  // theme and never written since (2026-10-14).
   font?: string
   uiFont?: string
   // The selected Preview theme's id, and the user's own themes. Absent →

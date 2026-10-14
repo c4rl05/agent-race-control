@@ -7,6 +7,10 @@ import {
   towerTitle,
   previewItems,
   applyPreviewItems,
+  previewCleared,
+  clearPreview,
+  unclearPreview,
+  visiblePreviewItems,
   applyAgents,
   applyHook,
   nudgeStatusFromKey,
@@ -41,7 +45,8 @@ import {
   editableTheme,
   duplicateTheme,
   renameTheme,
-  deleteTheme
+  deleteTheme,
+  migrateFonts
 } from './sessions.svelte'
 import { TODAY_ID } from './previewTheme'
 
@@ -853,6 +858,42 @@ describe('applyPreviewItems', () => {
   })
 })
 
+// Clear hides what had arrived, by index — the cache stays whole, so Show all
+// is forgetting the mark, and a from-zero re-read can't resurrect or drop items.
+describe('clearPreview', () => {
+  it('shows only what arrives after the clear, and Show all restores', () => {
+    applyPreviewItems('c', [{ kind: 'user', text: 'old' }], true)
+    clearPreview('c')
+    expect(visiblePreviewItems('c')).toEqual([])
+    applyPreviewItems('c', [{ kind: 'assistant', text: 'new' }], false)
+    expect(visiblePreviewItems('c')).toEqual([{ kind: 'assistant', text: 'new' }])
+    expect(previewItems['c']).toHaveLength(2)
+    unclearPreview('c')
+    expect(visiblePreviewItems('c')).toHaveLength(2)
+    expect(previewCleared['c']).toBeUndefined()
+  })
+
+  it('survives a from-zero re-read: the same items land past the same mark', () => {
+    const all = [
+      { kind: 'user', text: 'a' },
+      { kind: 'assistant', text: 'b' }
+    ] as const
+    applyPreviewItems('r', [all[0]], true)
+    clearPreview('r')
+    applyPreviewItems('r', [all[0]], true)
+    expect(visiblePreviewItems('r')).toEqual([])
+    applyPreviewItems('r', [all[1]], false)
+    expect(visiblePreviewItems('r')).toEqual([all[1]])
+  })
+
+  it('clearing an unseen conversation marks zero, and marks are per conversation', () => {
+    clearPreview('never')
+    expect(previewCleared['never']).toBe(0)
+    applyPreviewItems('other', [{ kind: 'user', text: 'x' }], true)
+    expect(visiblePreviewItems('other')).toHaveLength(1)
+  })
+})
+
 // The tower's repo→branch tree (issue #5): git cwds cluster by their shared
 // repo root (so all worktrees group together), non-git cwds stand alone, and a
 // cwd whose git info hasn't loaded yet is a plain folder until it does.
@@ -1348,5 +1389,33 @@ describe('preview themes', () => {
     const snap = snapshotState()
     expect(snap.previewTheme).toBe(a.id)
     expect(snap.previewThemes).toHaveLength(1)
+    // The fonts are the theme's now: the old ids are never written.
+    expect('font' in snap || 'uiFont' in snap).toBe(false)
+  })
+
+  // Settings → Fonts moved into the theme (2026-10-14): an old state file's
+  // picks survive by becoming the selected theme's, forking a built-in first.
+  describe('migrateFonts', () => {
+    it('writes differing picks into a forked built-in, by label', () => {
+      migrateFonts('jetbrains-mono', 'roboto')
+      expect(previewThemes).toHaveLength(1)
+      expect(activeTheme().name).toBe('Today copy')
+      expect(activeTheme().app).toEqual({ terminal: 'JetBrains Mono', ui: 'Roboto' })
+    })
+
+    it('edits a user theme in place, one font at a time', () => {
+      const mine = duplicateTheme(TODAY_ID, 'Mine')
+      migrateFonts('consolas', undefined)
+      expect(previewThemes).toHaveLength(1)
+      expect(mine.app).toEqual({ terminal: 'Consolas', ui: 'Inter' })
+    })
+
+    it('changes nothing when the picks already match, are absent, or are unknown', () => {
+      migrateFonts('cascadia', 'inter')
+      migrateFonts(undefined, undefined)
+      migrateFonts('comic-mono', 42)
+      expect(previewThemes).toHaveLength(0)
+      expect(ui.previewTheme).toBe(TODAY_ID)
+    })
   })
 })

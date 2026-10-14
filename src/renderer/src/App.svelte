@@ -102,6 +102,9 @@
     renameSession,
     applySpawnCwd,
     applyPreviewItems,
+    previewCleared,
+    clearPreview,
+    unclearPreview,
     dirColors,
     recentDirs,
     setGroupColor,
@@ -132,23 +135,95 @@
   } from './sessions.svelte'
   import type { Session, WorktreeEntry, ZoomPane } from './sessions.svelte'
   import ThemeEditor from './ThemeEditor.svelte'
-  import { DOT_COLORS, FONTS, UI_FONTS, cardInk, chromeVars, fontStack } from './theme'
+  import { DOT_COLORS, cardInk, chromeVars } from './theme'
+  import { terminalStack, uiStack } from './previewTheme'
   import arcIconPng from './assets/arc.png?inline'
 
   // One menu at a time, one scaffold (backdrop + positioned panel + Escape)
-  // for all five. spawn: the filter bar's per-type dropdowns — recent
+  // for all seven. spawn: the filter bar's per-type dropdowns — recent
   // directories plus Browse…; sessions in a live directory spawn from the
   // group header's hover cluster instead. type-filter: the filter box's
   // session-type dropdown. color: right-click a group header.
   // session: right-click a session row. worktrees: the repo card's reopen
   // menu — parked worktrees fetched on click, items carried in the menu.
+  // edit: right-click any text field. preview: right-click the Preview.
   type Menu =
     | { kind: 'spawn'; type: SessionType; x: number; y: number }
     | { kind: 'color'; dir: string; x: number; y: number }
     | { kind: 'session'; key: number; x: number; y: number }
     | { kind: 'type-filter'; x: number; y: number }
     | { kind: 'worktrees'; repoRoot: string; items: WorktreeEntry[]; x: number; y: number }
+    | { kind: 'edit'; field: TextField; x: number; y: number }
+    | { kind: 'preview'; root: HTMLElement; text: string; x: number; y: number }
   let menu = $state<Menu | null>(null)
+
+  // The edit menu every text field gets on right-click (2026-10-14): Electron
+  // ships no context menu, so a right-click in Notes did nothing. Notepad's
+  // list, each run as the field's own editing command so it lands on the
+  // field's undo stack — paste goes through insertText rather than assigning
+  // the value, which is what keeps Ctrl+Z working after it. One handler on the
+  // window for every field (Notes, the filter box, rename, the theme editor),
+  // so no field behaves differently from another. The terminal keeps its own
+  // right-click (Windows Terminal's copy-else-paste) and claims the event
+  // first, as every other menu in the app does.
+  type TextField = HTMLInputElement | HTMLTextAreaElement
+  const TEXT_INPUTS = new Set(['text', 'search', 'url', 'email', 'number', 'tel'])
+  const MOD = window.arc.platform === 'darwin' ? '⌘' : 'Ctrl+'
+  const REDO_KEY = window.arc.platform === 'darwin' ? '⇧⌘Z' : 'Ctrl+Y'
+
+  function textField(target: EventTarget | null): TextField | null {
+    if (target instanceof HTMLTextAreaElement) return target
+    if (target instanceof HTMLInputElement && TEXT_INPUTS.has(target.type)) return target
+    return null
+  }
+
+  function onContextMenu(e: MouseEvent): void {
+    if (e.defaultPrevented) return
+    const target = e.target instanceof Element ? e.target : null
+    if (!target || target.closest('.xterm')) return
+    const field = textField(target)
+    const preview = target.closest<HTMLElement>('.preview')
+    if (field && !field.disabled) {
+      e.preventDefault()
+      openMenu({ kind: 'edit', field, x: e.clientX, y: e.clientY }, 250)
+    } else if (preview) {
+      e.preventDefault()
+      const text = window.getSelection()?.toString() ?? ''
+      openMenu({ kind: 'preview', root: preview, text, x: e.clientX, y: e.clientY }, 110)
+    }
+  }
+
+  type EditCommand = 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'delete' | 'selectAll'
+
+  function editField(field: TextField, command: EditCommand): void {
+    menu = null
+    field.focus()
+    if (command === 'paste') {
+      void navigator.clipboard.readText().then((text) => {
+        field.focus()
+        document.execCommand('insertText', false, text)
+      })
+    } else document.execCommand(command)
+  }
+
+  // The Preview's find bar (Preview.svelte draws it). One flag for the app:
+  // only the focused session's Preview is ever mounted. The epoch re-focuses an
+  // already-open bar, which is what a second Ctrl+F means.
+  let findOpen = $state(false)
+  let findEpoch = $state(0)
+
+  function openFind(): void {
+    findOpen = true
+    findEpoch++
+  }
+
+  // A find belongs to the Preview it was opened on: picking another session or
+  // tab closes it, rather than reappearing over a different conversation.
+  $effect(() => {
+    void ui.focused
+    void sessions.find((s) => s.key === ui.focused)?.view
+    findOpen = false
+  })
   let settingsOpen = $state(false)
   // The Preview theme editor: a full-window overlay over everything, Settings
   // included (opening it closes Settings).
@@ -362,8 +437,7 @@
     { id: 1, label: '100%' }
   ]
   // The unselected cards get one step the selected card doesn't: no background
-  // at all. `background: none` and a 0% mix are not the same thing on light,
-  // where bgSubtle is a shade off the canvas — this is the transparent one.
+  // at all — the transparent one, rather than a 0% mix over the tower ground.
   const CARD_WASHES_REST: { id: 0 | 0.1 | 0.5 | 1; label: string }[] = [
     { id: 0, label: 'None' },
     ...CARD_WASHES
@@ -374,8 +448,9 @@
     { id: 'none', label: 'None' }
   ]
 
-  // Which font row in Settings is unfolded, or null. One value, not a flag per
-  // row: opening one closes the others, so the panel keeps its height.
+  // Which picker in Settings is unfolded, or null — the theme's is the one left
+  // (the font rows moved into the theme, 2026-10-14). A value, not a flag, so a
+  // second picker would close the first and the panel keeps its height.
   let openFont = $state<string | null>(null)
 
   // Where the panel has been dragged to, in viewport px, or null for "centred".
@@ -554,15 +629,17 @@
   const effective = $derived(ui.mode === 'system' ? (systemDark ? 'dark' : 'light') : ui.mode)
   const palette = $derived(palettes[effective])
 
-  // The selected terminal-font stack — fed to every terminal (xterm option)
-  // and the preview's code blocks (--mono). Changing it live-swaps all panes;
-  // see Terminal's font effect for the load-before-remeasure handling.
-  const monoFont = $derived(fontStack(ui.font))
-
-  // The sans stack (UI_FONTS) for the app chrome (--ui-font on .shell). The
-  // Preview's fonts are its theme's (previewTheme.ts).
-  const chromeFont = $derived(fontStack(ui.uiFont, UI_FONTS))
+  // The selected theme — the Preview's look, and the app's two fonts.
   const previewTheme = $derived(activeTheme())
+
+  // The theme's terminal-font stack — fed to every terminal (xterm option),
+  // Notes/Session, and the Preview code a theme sets to "Terminal". Changing it
+  // live-swaps all panes; see Terminal's font effect for the
+  // load-before-remeasure handling.
+  const monoFont = $derived(terminalStack(previewTheme))
+
+  // The theme's sans stack for the app chrome (--ui-font on .shell).
+  const chromeFont = $derived(uiStack(previewTheme))
 
   // Status-dot fills. Default: the Primer semantic tones (per theme). With the
   // Status RGB setting on: pure traffic-light RGB, identical in both themes.
@@ -605,7 +682,8 @@
   function cardInkAttr(group: GroupView): 'light' | 'dark' | null {
     const active = hasFocused(group)
     const borrowed = ui.cardDark && effective === 'light' && active
-    const ground = borrowed ? palettes.dark.chrome.bgSubtle : palette.chrome.bgSubtle
+    // The tower's ground is the canvas (`.tower` re-points --bg-subtle at --bg).
+    const ground = borrowed ? palettes.dark.chrome.bg : palette.chrome.bg
     const own = borrowed ? 'dark' : effective
     const ink = cardInk(
       dirColors[group.repCwd],
@@ -877,6 +955,27 @@
   // group comes in (a plain folder's flat list, a repo's branches) reconciled
   // in ONE place. Both readers below want exactly this, and a third group kind
   // would otherwise have to be remembered in each of them.
+  // "Archive all sessions below" (2026-10-14): every live row under this one in
+  // the TOWER, not just its card — card by card, and within a card in the
+  // order it draws them (branch by branch, a parked worktree spawn last, as
+  // `tower` lists them). Each lands in its own card's archive, since that's
+  // where an archive lives. Rows the filter hides are not "below" — what is
+  // below is what the filter shows — but a folded card's are: folding hides a
+  // card's rows, it doesn't move them.
+  function rowsBelow(key: number): Session[] {
+    const drawn = tower.flatMap((group) =>
+      group.kind === 'plain' ? group.visible : group.branches.flatMap((b) => b.visible)
+    )
+    const at = drawn.findIndex((s) => s.key === key)
+    return at === -1 ? [] : drawn.slice(at + 1)
+  }
+
+  // Bottom-up, because each archived row lands at the TOP of its card's archive
+  // (setArchived): the rows keep the order they had, under the ones already there.
+  function archiveBelow(key: number): void {
+    for (const s of rowsBelow(key).reverse()) setArchived(s.key, true)
+  }
+
   function groupSessions(group: GroupView): Session[] {
     const live = group.kind === 'plain' ? group.sessions : group.branches.flatMap((b) => b.sessions)
     return [...live, ...group.archived]
@@ -1016,6 +1115,27 @@
      not match this file's scoped `.tab .svg-icon`-style rules, and sizing every
      call site by hand is how the icon column stops lining up. Sized in em so the
      existing font-size rules keep driving it, exactly like the font icons. -->
+<!-- One row of the edit menu. pointerdown is cancelled so the click never
+     takes focus from the field: its selection is what the command acts on. -->
+{#snippet editItem(
+  field: TextField,
+  command: EditCommand,
+  glyph: string,
+  label: string,
+  key: string,
+  enabled: boolean
+)}
+  <button
+    class="menu-item"
+    disabled={!enabled}
+    onpointerdown={(e) => e.preventDefault()}
+    onclick={() => editField(field, command)}
+  >
+    <span class="material-symbols-outlined">{glyph}</span>{label}
+    <span class="menu-key">{key}</span>
+  </button>
+{/snippet}
+
 {#snippet icon(name: keyof typeof ICONS, cls = '', label = '')}
   {@const i = ICONS[name]}
   <svg
@@ -1402,6 +1522,40 @@
                 <span class="material-symbols-outlined">edit_note</span>Notes
               </button>
             {/if}
+            <!-- The Preview's two actions, on the tab they act on. Clear hides
+                 everything so far and shows only what comes next; once cleared
+                 it reads Show all, so the gesture is always one click from
+                 undone. -->
+            {#if session.view === 'preview' && session.claudeSessionId}
+              {@const conversation = session.claudeSessionId}
+              <div class="tab-actions">
+                <button
+                  class="tab-action"
+                  class:on={findOpen}
+                  title={`Find (${MOD}F)`}
+                  onclick={() => (findOpen ? (findOpen = false) : openFind())}
+                >
+                  <span class="material-symbols-outlined">search</span>Find
+                </button>
+                {#if previewCleared[conversation] !== undefined}
+                  <button
+                    class="tab-action"
+                    title="Show the whole conversation again"
+                    onclick={() => unclearPreview(conversation)}
+                  >
+                    <span class="material-symbols-outlined">history</span>Show all
+                  </button>
+                {:else}
+                  <button
+                    class="tab-action"
+                    title="Hide the conversation so far; show only what comes next"
+                    onclick={() => clearPreview(conversation)}
+                  >
+                    <span class="material-symbols-outlined">clear_all</span>Clear
+                  </button>
+                {/if}
+              </div>
+            {/if}
           </div>
         {/if}
         <!-- The terminal stays mounted while hidden — the PTY's lifetime is
@@ -1507,7 +1661,9 @@
                 kind={session.type === 'codex' ? 'codex' : 'claude'}
                 look={previewTheme}
                 mode={effective}
-                terminalFont={monoFont}
+                find={findOpen}
+                {findEpoch}
+                onFindClose={() => (findOpen = false)}
               />
             {:else if session.claudeSessionId}
               <!-- unfocused, parked on its preview tab: nothing to render,
@@ -1575,57 +1731,6 @@
     >
       <span class="knob"></span>
     </button>
-  {/snippet}
-
-  <!-- One font setting: a picker showing the current face IN that face, which
-       unfolds in place to the whole list, each name likewise previewing itself.
-       In place rather than as a popup menu — the panel is already a dialog, and
-       a second layer over it would need its own backdrop and z-index. One open
-       at a time (openFont holds the row, not a boolean per row), so the panel
-       never grows by three lists at once. font-family only — the size of the
-       terminal and the preview is the zoom. -->
-  {#snippet fontRow(
-    label: string,
-    key: string,
-    list: typeof FONTS,
-    selected: string,
-    pick: (id: string) => void
-  )}
-    {@const current = list.find((f) => f.id === selected) ?? list[0]}
-    {@const open = openFont === key}
-    <div class="set-row">
-      <span class="set-label">{label}</span>
-      <button
-        class="picker"
-        class:open
-        aria-expanded={open}
-        aria-label={`${label} font: ${current.label}`}
-        style:font-family={current.stack}
-        onclick={() => (openFont = open ? null : key)}
-      >
-        <span class="picker-name">{current.label}</span>
-        <span class="material-symbols-outlined">expand_more</span>
-      </button>
-    </div>
-    {#if open}
-      <div class="options" role="radiogroup" aria-label={`${label} font`}>
-        {#each list as font (font.id)}
-          <button
-            class="option"
-            class:on={selected === font.id}
-            role="radio"
-            aria-checked={selected === font.id}
-            style:font-family={font.stack}
-            onclick={() => {
-              pick(font.id)
-              openFont = null
-            }}
-          >
-            {font.label}
-          </button>
-        {/each}
-      </div>
-    {/if}
   {/snippet}
 
   <!-- The card's name, which doubles as the collapse toggle (issue #5): click
@@ -1792,7 +1897,7 @@
       onclick={() => focusSession(session.key)}
       oncontextmenu={(e) => {
         e.preventDefault()
-        openMenu({ kind: 'session', key: session.key, x: e.clientX, y: e.clientY }, 280)
+        openMenu({ kind: 'session', key: session.key, x: e.clientX, y: e.clientY }, 310)
       }}
       onkeydown={(e) => e.key === 'Enter' && focusSession(session.key)}
     >
@@ -1946,6 +2051,54 @@
         >
           {@render icon('terminal-window')}Shell sessions
         </button>
+      {:else if menu.kind === 'edit'}
+        {@const field = menu.field}
+        {@const selected = field.selectionStart !== field.selectionEnd}
+        {@const writable = !field.readOnly}
+        {@render editItem(field, 'undo', 'undo', 'Undo', `${MOD}Z`, writable)}
+        {@render editItem(field, 'redo', 'redo', 'Redo', REDO_KEY, writable)}
+        <div class="menu-divider"></div>
+        {@render editItem(field, 'cut', 'content_cut', 'Cut', `${MOD}X`, writable && selected)}
+        {@render editItem(field, 'copy', 'content_copy', 'Copy', `${MOD}C`, selected)}
+        {@render editItem(field, 'paste', 'content_paste', 'Paste', `${MOD}V`, writable)}
+        {@render editItem(field, 'delete', 'backspace', 'Delete', 'Del', writable && selected)}
+        <div class="menu-divider"></div>
+        {@render editItem(field, 'selectAll', 'select_all', 'Select all', `${MOD}A`, true)}
+      {:else if menu.kind === 'preview'}
+        {@const text = menu.text}
+        {@const root = menu.root}
+        <button
+          class="menu-item"
+          disabled={!text}
+          onclick={() => {
+            void navigator.clipboard.writeText(text)
+            menu = null
+          }}
+        >
+          <span class="material-symbols-outlined">content_copy</span>Copy
+          <span class="menu-key">{MOD}C</span>
+        </button>
+        <button
+          class="menu-item"
+          onclick={() => {
+            const conversation = root.querySelector('.conv')
+            if (conversation) window.getSelection()?.selectAllChildren(conversation)
+            menu = null
+          }}
+        >
+          <span class="material-symbols-outlined">select_all</span>Select all
+        </button>
+        <div class="menu-divider"></div>
+        <button
+          class="menu-item"
+          onclick={() => {
+            menu = null
+            openFind()
+          }}
+        >
+          <span class="material-symbols-outlined">search</span>Find…
+          <span class="menu-key">{MOD}F</span>
+        </button>
       {:else if menu.kind === 'color'}
         {#each DOT_COLORS as entry (entry.name)}
           <button
@@ -2037,6 +2190,17 @@
               <span class="material-symbols-outlined">archive</span>Archive session
             {/if}
           </button>
+          {#if !menuSession.archived && rowsBelow(menuSession.key).length > 0}
+            <button
+              class="menu-item"
+              onclick={() => {
+                archiveBelow(menuSession.key)
+                menu = null
+              }}
+            >
+              <span class="material-symbols-outlined">low_priority</span>Archive all sessions below
+            </button>
+          {/if}
           <button
             class="menu-item"
             onclick={() => {
@@ -2052,11 +2216,7 @@
   {/if}
 
   {#if themeEditorOpen}
-    <ThemeEditor
-      mode={effective}
-      terminalFont={monoFont}
-      onclose={() => (themeEditorOpen = false)}
-    />
+    <ThemeEditor mode={effective} onclose={() => (themeEditorOpen = false)} />
   {/if}
 
   {#if settingsOpen}
@@ -2094,8 +2254,8 @@
         <section class="set-group">
           <h2>Appearance</h2>
           <div class="set-row">
-            <span class="set-label">Theme</span>
-            <div class="segmented" role="radiogroup" aria-label="Theme">
+            <span class="set-label">Mode</span>
+            <div class="segmented" role="radiogroup" aria-label="Mode">
               {#each MODES as mode (mode)}
                 <button
                   class="seg"
@@ -2190,23 +2350,18 @@
           </p>
         </section>
 
+        <!-- The theme (kickoff doc, "Preview themes" and "The theme takes the
+             fonts"): the Preview's look and the terminal and interface fonts —
+             a quick switch here, and everything else in the editor. -->
         <section class="set-group">
-          <h2>Fonts</h2>
-          {@render fontRow('Terminal', 'terminal', FONTS, ui.font, (id) => (ui.font = id))}
-          {@render fontRow('Interface', 'interface', UI_FONTS, ui.uiFont, (id) => (ui.uiFont = id))}
-        </section>
-
-        <!-- The Preview's look is a theme (kickoff doc, "Preview themes"): a
-             quick switch here, and everything else in the editor. -->
-        <section class="set-group">
-          <h2>Preview</h2>
+          <h2>Theme</h2>
           <div class="set-row">
             <span class="set-label">Theme</span>
             <button
               class="picker"
               class:open={openFont === 'theme'}
               aria-expanded={openFont === 'theme'}
-              aria-label={`Preview theme: ${previewTheme.name}`}
+              aria-label={`Theme: ${previewTheme.name}`}
               onclick={() => (openFont = openFont === 'theme' ? null : 'theme')}
             >
               <span class="picker-name">{previewTheme.name}</span>
@@ -2214,7 +2369,7 @@
             </button>
           </div>
           {#if openFont === 'theme'}
-            <div class="options" role="radiogroup" aria-label="Preview theme">
+            <div class="options" role="radiogroup" aria-label="Theme">
               {#each allThemes() as theme (theme.id)}
                 <button
                   class="option"
@@ -2252,6 +2407,7 @@
 </div>
 
 <svelte:window
+  oncontextmenu={onContextMenu}
   onkeydown={(e) => {
     if (e.key === 'Escape') {
       // An open font picker is the innermost thing Escape can mean, so it goes
@@ -2261,6 +2417,18 @@
       else if (openFont) openFont = null
       else if (settingsOpen) settingsOpen = false
       else if (menu) menu = null
+      else if (findOpen) findOpen = false
+    }
+    // Find, the host's own chord, and only while the focused pane is showing
+    // its Preview: anywhere else Ctrl+F belongs to whatever has the keyboard
+    // (in the terminal, the agent), so it is never shadowed there.
+    const mod = window.arc.platform === 'darwin' ? e.metaKey : e.ctrlKey
+    if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f' && !themeEditorOpen) {
+      const focused = sessions.find((s) => s.key === ui.focused)
+      if (focused?.view === 'preview' && focused.claudeSessionId) {
+        e.preventDefault()
+        openFind()
+      }
     }
   }}
 />
@@ -2355,11 +2523,19 @@
     border-radius: 1px;
   }
 
+  /* The tower sits on the canvas, white in light (2026-10-14; it was
+     `bg-subtle`, a shade off). Dark is unchanged — its bg and bgSubtle are
+     both #000000. `--bg-subtle` is re-pointed rather than every rule below
+     edited: it is what the card washes mix OVER, and a token resolved here is
+     inherited already computed, so a card whose ink overrides re-point `--bg`
+     still mixes over the tower's ground (cardInkAttr measures the same one).
+     The boundary with the pane is the splitter's 1px hairline, as in dark. */
   .tower {
+    --bg-subtle: var(--bg);
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
-    background: var(--bg-subtle);
+    background: var(--bg);
   }
 
   .splitter {
@@ -3509,6 +3685,42 @@
     border-bottom-color: var(--accent);
   }
 
+  /* The Preview's Find and Clear: the tab row's own type, pushed to its far
+     end, and no underline — they act on the tab, they aren't tabs. */
+  .tab-actions {
+    display: flex;
+    gap: 2px;
+    margin-left: auto;
+  }
+
+  .tab-action {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    margin: 2px 0 3px;
+    border: none;
+    border-radius: 5px;
+    background: none;
+    color: var(--fg-muted);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .tab-action .material-symbols-outlined {
+    font-size: 15px;
+  }
+
+  .tab-action:hover {
+    color: var(--fg);
+    background: var(--border);
+  }
+
+  .tab-action.on {
+    color: var(--accent);
+  }
+
   .view {
     flex: 1;
     min-height: 0;
@@ -3575,6 +3787,24 @@
 
   .menu-item.color {
     text-transform: capitalize;
+  }
+
+  .menu-item:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .menu-item:disabled:hover {
+    background: none;
+  }
+
+  /* A command's chord, right-aligned and muted — the edit menu's and the
+     Preview's, so the menu teaches the key it stands in for. */
+  .menu-key {
+    margin-left: auto;
+    padding-left: 18px;
+    color: var(--fg-muted);
+    font-size: 11px;
   }
 
   .menu-item.active {

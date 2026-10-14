@@ -1,4 +1,4 @@
-import { DOT_COLORS, DEFAULT_FONT_ID, DEFAULT_UI_FONT_ID, type Mode } from './theme'
+import { DOT_COLORS, FONTS, UI_FONTS, type Mode } from './theme'
 import type { ScreenState } from './screen'
 import type { ProgramState } from './program'
 import {
@@ -431,11 +431,8 @@ export const ui = $state<{
   // construction (the borrowed palette IS the current one), so the flag is only
   // consulted while the effective theme is light. On by default.
   cardDark: boolean
-  // Selected font ids: terminal (mono, theme.ts FONTS) and interface/app
-  // chrome (sans, theme.ts UI_FONTS). The Preview's fonts are its theme's.
-  font: string
-  uiFont: string
-  // The selected Preview theme: a built-in's id or one of previewThemes'.
+  // The selected theme: a built-in's id or one of previewThemes'. It sets the
+  // Preview, and the terminal and interface fonts (previewTheme.ts, ThemeApp).
   previewTheme: string
 }>({
   focused: null,
@@ -450,8 +447,6 @@ export const ui = $state<{
   cardWashRest: 0,
   cardEdge: 'none',
   cardDark: true,
-  font: DEFAULT_FONT_ID,
-  uiFont: DEFAULT_UI_FONT_ID,
   previewTheme: TODAY_ID
 })
 
@@ -508,6 +503,23 @@ export function deleteTheme(id: string): void {
   if (index < 0) return
   previewThemes.splice(index, 1)
   if (ui.previewTheme === id) ui.previewTheme = TODAY_ID
+}
+
+// Settings → Fonts became the theme's App section (2026-10-14). A state file
+// from before carries the two picks as font ids; where one differs from what
+// the selected theme now says, it is kept by writing it into the theme — a
+// built-in forks first, exactly as any edit forks it. One-time by
+// construction: neither id is saved again. Unknown ids are no pick at all.
+export function migrateFonts(font: unknown, uiFont: unknown): void {
+  const terminal = FONTS.find((f) => f.id === font)?.label
+  const chrome = UI_FONTS.find((f) => f.id === uiFont)?.label
+  const current = activeTheme().app
+  const changeTerminal = terminal !== undefined && terminal !== current.terminal
+  const changeChrome = chrome !== undefined && chrome !== current.ui
+  if (!changeTerminal && !changeChrome) return
+  const target = editableTheme()
+  if (changeTerminal) target.app.terminal = terminal
+  if (changeChrome) target.app.ui = chrome
 }
 
 export function addTheme(theme: PreviewTheme): void {
@@ -1107,6 +1119,28 @@ export function applyPreviewItems(sessionId: string, items: PreviewItem[], reset
   else cached.push(...items)
 }
 
+// The Preview's Clear (2026-10-14): how many of a conversation's items had
+// arrived when it was cleared; the Preview draws only what comes after. An
+// index rather than a copy, so the cache stays whole and Show all is just
+// forgetting the mark — and since the fold is deterministic, a from-zero
+// re-read lands every item back at the same index. Keyed like the cache (the
+// conversation id, so a `/clear` starts unmarked) and deliberately NOT
+// persisted: a gesture for right now, like the Settings panel's position —
+// reopening the app shows the whole conversation again.
+export const previewCleared = $state<Record<string, number>>({})
+
+export function clearPreview(sessionId: string): void {
+  previewCleared[sessionId] = previewItems[sessionId]?.length ?? 0
+}
+
+export function unclearPreview(sessionId: string): void {
+  delete previewCleared[sessionId]
+}
+
+export function visiblePreviewItems(sessionId: string): PreviewItem[] {
+  return (previewItems[sessionId] ?? []).slice(previewCleared[sessionId] ?? 0)
+}
+
 // Mirrors WorktreeEntry in src/main/git.ts (the renderer can't import from
 // main): one worktree as `git worktree list` reports it.
 export interface WorktreeEntry {
@@ -1261,12 +1295,11 @@ export async function restoreState(): Promise<void> {
   ui.cardWashRest = oneOf(saved.cardWashRest, [0, 0.1, 0.5, 1], 0)
   ui.cardEdge = oneOf(saved.cardEdge, ['outline', 'none', 'tab'], 'none')
   ui.cardDark = saved.cardDark ?? true
-  ui.font = saved.font ?? DEFAULT_FONT_ID
-  ui.uiFont = saved.uiFont ?? DEFAULT_UI_FONT_ID
   // Validated, not trusted: these values end up inside CSS (previewTheme.ts).
   previewThemes.push(...normalizeThemes(saved.previewThemes))
   ui.previewTheme = typeof saved.previewTheme === 'string' ? saved.previewTheme : TODAY_ID
   if (activeTheme().id !== ui.previewTheme) ui.previewTheme = TODAY_ID
+  migrateFonts(saved.font, saved.uiFont)
   if (saved.dirOrder?.length) dirOrder.push(...saved.dirOrder)
   if (saved.dirColors) Object.assign(dirColors, saved.dirColors)
   if (saved.collapsed) for (const key of saved.collapsed) collapsedGroups[key] = true
@@ -1346,8 +1379,6 @@ export function snapshotState(): PersistedState {
     cardWashRest: ui.cardWashRest,
     cardEdge: ui.cardEdge,
     cardDark: ui.cardDark,
-    font: ui.font,
-    uiFont: ui.uiFont,
     previewTheme: ui.previewTheme,
     // Only when there are any — most files never carry one.
     previewThemes: previewThemes.length ? $state.snapshot(previewThemes) : undefined,

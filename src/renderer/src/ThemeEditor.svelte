@@ -17,8 +17,10 @@
     exportTheme,
     fontStack,
     importTheme,
+    terminalStack,
     type FontKind,
     type PreviewTheme,
+    type ThemeApp,
     type ThemeCode,
     type ThemePrompt,
     type ThemeType
@@ -35,7 +37,7 @@
     themeNames,
     ui
   } from './sessions.svelte'
-  import type { Mode } from './theme'
+  import { FONTS, UI_FONTS, type FontOption, type Mode } from './theme'
 
   // The theme editor (kickoff doc, "Preview themes"): the playground's layout
   // inside the app. Tabs on the left; on the right the sample conversation,
@@ -44,20 +46,19 @@
   // user copy by the first edit — and the store's persist effect saves it.
   let {
     mode,
-    terminalFont,
     onclose
   }: {
     mode: 'dark' | 'light'
-    terminalFont: string
     onclose: () => void
   } = $props()
 
-  type Tab = 'themes' | 'type' | 'prompts' | 'code'
+  type Tab = 'themes' | 'type' | 'prompts' | 'code' | 'app'
   const TABS: { id: Tab; label: string }[] = [
     { id: 'themes', label: 'Themes' },
     { id: 'type', label: 'Type' },
     { id: 'prompts', label: 'Prompts' },
-    { id: 'code', label: 'Code' }
+    { id: 'code', label: 'Code' },
+    { id: 'app', label: 'App' }
   ]
   const MODES: { id: Mode; label: string }[] = [
     { id: 'light', label: 'Light' },
@@ -100,6 +101,14 @@
     <K extends keyof ThemeCode>(key: K) =>
     (value: ThemeCode[K]) =>
       edit((t) => (t.code[key] = value))
+  const setApp =
+    <K extends keyof ThemeApp>(key: K) =>
+    (value: ThemeApp[K]) =>
+      edit((t) => (t.app[key] = value))
+
+  // The stack "Terminal font" stands for in the font lists and theme cards:
+  // the selected theme's own terminal font.
+  const terminalFont = $derived(terminalStack(theme))
 
   function pickPromptStyle(style: ThemePrompt['style']): void {
     edit((t) => {
@@ -259,6 +268,25 @@
       {/each}
     </div>
   </div>
+{/snippet}
+
+<!-- The App tab's two fonts: only the faces the terminal and the chrome can
+     take (previewTheme.ts, ThemeApp), each option set in its own face. -->
+{#snippet appFont(label: string, value: string, options: FontOption[], set: (v: string) => void)}
+  {@const current = options.find((f) => f.label === value) ?? options[0]}
+  <label class="ctl">
+    <span class="lbl">{label}</span>
+    <select
+      class="wide"
+      {value}
+      style:font-family={current.stack}
+      onchange={(e) => set(e.currentTarget.value)}
+    >
+      {#each options as option (option.id)}
+        <option value={option.label} style:font-family={option.stack}>{option.label}</option>
+      {/each}
+    </select>
+  </label>
 {/snippet}
 
 {#snippet colour(label: string, value: string, set: (v: string) => void, swatches = false)}
@@ -517,6 +545,14 @@
         {@render range('Size', theme.prompt.size, PROMPT_RANGES.size, setPrompt('size'), '×')}
         {@render colour('Colour', theme.prompt.color, setPrompt('color'))}
         {@render check('Italic', theme.prompt.italic, setPrompt('italic'))}
+      {:else if tab === 'app'}
+        <h3>Fonts</h3>
+        {@render appFont('Terminal', theme.app.terminal, FONTS, setApp('terminal'))}
+        {@render appFont('Interface', theme.app.ui, UI_FONTS, setApp('ui'))}
+        <p class="hint">
+          The terminal's font, and the font of everything around it. A code font of "Terminal font"
+          follows the first.
+        </p>
       {:else}
         <p class="hint">Each code theme has a dark and a light variant; Appearance picks one.</p>
         <div class="grid">
@@ -581,7 +617,7 @@
     </div>
     <div class="stage">
       <div class="pane" style:width={`${paneWidth}px`} bind:this={stage}>
-        <Conversation items={SAMPLE} {look} {mode} {terminalFont} />
+        <Conversation items={SAMPLE} {look} {mode} />
       </div>
     </div>
   </main>

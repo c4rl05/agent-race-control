@@ -1,6 +1,6 @@
 <script lang="ts">
   import { renderMarkdown } from './markdown'
-  import { styleString, themeClass, themeVars, type Look } from './previewTheme'
+  import { styleString, terminalStack, themeClass, themeVars, type Look } from './previewTheme'
 
   // A conversation set in a Preview theme: the live Preview's content and the
   // theme editor's sample are both this, so the editor shows exactly what the
@@ -8,24 +8,67 @@
   let {
     items,
     look,
-    mode,
-    terminalFont
+    mode
   }: {
     items: PreviewItem[]
     look: Look
     mode: 'dark' | 'light'
-    // The terminal picker's stack — the code font a theme can follow.
-    terminalFont: string
   } = $props()
 
-  const style = $derived(styleString(themeVars(look, mode, terminalFont)))
+  // The code font "Terminal" follows the look's own terminal font, so Hold to
+  // compare shows Today's code font too, not the selected theme's.
+  const style = $derived(styleString(themeVars(look, mode, terminalStack(look))))
+
+  // A compaction arrives as two items, the boundary and then the summary the
+  // session continues from (transcript.ts), and draws as ONE divider that
+  // folds the summary away. Not a prompt, not a reply: a chapter break, where
+  // the agent's memory was rebuilt. Either half can arrive alone (a tail that
+  // started between them, a drifted version) and still draws.
+  type Row =
+    | { kind: 'user' | 'assistant'; text: string }
+    | { kind: 'compacted'; label: string; text: string }
+
+  function compactLabel(trigger: string, tokens: number): string {
+    const how = trigger === 'auto' ? 'auto' : trigger === 'manual' ? '/compact' : ''
+    const size = tokens > 0 ? `${Math.round(tokens / 1000)}k tokens` : ''
+    return ['Context compacted', how, size].filter(Boolean).join(' · ')
+  }
+
+  const rows = $derived.by(() => {
+    const out: Row[] = []
+    for (const item of items) {
+      if (item.kind === 'compact') {
+        out.push({ kind: 'compacted', label: compactLabel(item.trigger, item.tokens), text: '' })
+      } else if (item.kind === 'summary') {
+        const last = out[out.length - 1]
+        if (last?.kind === 'compacted' && !last.text) last.text = item.text
+        else out.push({ kind: 'compacted', label: compactLabel('', 0), text: item.text })
+      } else out.push(item)
+    }
+    return out
+  })
 </script>
 
 <div class="conv {themeClass(look)}" {style}>
   <div class="inner">
-    {#each items as item, index (index)}
+    {#each rows as item, index (index)}
       {#if item.kind === 'assistant'}
         <div class="assistant">{@html renderMarkdown(item.text)}</div>
+      {:else if item.kind === 'compacted'}
+        {#if item.text}
+          <details class="compacted">
+            <summary class="compact-rule">
+              <span class="compact-label"
+                ><span class="material-symbols-outlined chev">expand_more</span>{item.label}</span
+              >
+            </summary>
+            <div class="assistant compact-body">{@html renderMarkdown(item.text)}</div>
+          </details>
+        {:else}
+          <div class="compacted">
+            <div class="compact-rule"><span class="compact-label">{item.label}</span></div>
+          </div>
+        {/if}
       {:else}
         <div class="user">
           <span class="who">You</span>
@@ -393,6 +436,73 @@
     border-top-left-radius: 0;
   }
 
+  /* ---- a compaction: a rule across the measure, the summary folded under it.
+     Chrome, not conversation — the app's small-caps label idiom (.who) in muted
+     ink, so no prompt treatment or body style can make it read as either side
+     of the conversation. ---- */
+  .compacted {
+    margin: calc(var(--para) * 2.6) 0;
+  }
+
+  .compact-rule {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    list-style: none;
+    color: var(--fg-muted);
+    font:
+      600 10.5px/1 var(--ui-font, system-ui),
+      sans-serif;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    user-select: none;
+  }
+
+  .compact-rule::-webkit-details-marker {
+    display: none;
+  }
+
+  .compact-rule::before,
+  .compact-rule::after {
+    content: '';
+    flex: 1;
+    border-top: 1px dashed var(--border);
+  }
+
+  summary.compact-rule {
+    cursor: pointer;
+  }
+
+  summary.compact-rule:hover {
+    color: var(--fg);
+  }
+
+  .compact-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+
+  .chev {
+    font-size: 14px;
+    transition: transform 0.12s;
+  }
+
+  .compacted:not([open]) .chev {
+    transform: rotate(-90deg);
+  }
+
+  /* Unfolded: the summary as the agent will read it, set back and muted —
+     markdown, through the same renderer as a reply, so its lists and code read. */
+  .assistant.compact-body {
+    margin: var(--para) 0 0;
+    padding-left: 0.9em;
+    border-left: 2px solid var(--border);
+    color: var(--fg-muted);
+    font-size: 0.92em;
+  }
+
   /* ---- your prompts: fourteen treatments, one class each (ps-*). ---- */
   .user {
     position: relative;
@@ -402,6 +512,12 @@
     font-size: calc(1em * var(--prompt-size));
     font-style: var(--prompt-style);
     color: var(--prompt-col);
+  }
+
+  /* Your text keeps its own line breaks. On the text, not on .user: there the
+     markup's whitespace before the (usually hidden) "You" label rendered as an
+     empty first line inside every prompt. */
+  .ptext {
     white-space: pre-wrap;
   }
 

@@ -183,6 +183,47 @@ describe('parseLine', () => {
     ])
   })
 
+  // The shapes as Claude Code wrote them (v2.1.x, measured 2026-10-14): the
+  // boundary, then the summary as a user entry flagged isCompactSummary.
+  it('reduces a compaction to a boundary and a summary, never a user prompt', () => {
+    const boundary = {
+      type: 'system',
+      subtype: 'compact_boundary',
+      content: 'Conversation compacted',
+      compactMetadata: { trigger: 'auto', preTokens: 358054 }
+    }
+    expect(parseLine(line(boundary))).toEqual([
+      { kind: 'compact', trigger: 'auto', tokens: 358054 }
+    ])
+    const summary = 'This session is being continued from a previous conversation…'
+    expect(
+      parseLine(
+        line({
+          type: 'user',
+          isCompactSummary: true,
+          isVisibleInTranscriptOnly: true,
+          message: { content: summary }
+        })
+      )
+    ).toEqual([{ kind: 'summary', text: summary }])
+    const blocks = [
+      { type: 'text', text: 'part one' },
+      { type: 'text', text: 'part two' }
+    ]
+    expect(
+      parseLine(line({ type: 'user', isCompactSummary: true, message: { content: blocks } }))
+    ).toEqual([{ kind: 'summary', text: 'part one\n\npart two' }])
+  })
+
+  it('keeps a boundary whose metadata drifted, with blank facts', () => {
+    expect(
+      parseLine(
+        line({ type: 'system', subtype: 'compact_boundary', compactMetadata: { preTokens: '9' } })
+      )
+    ).toEqual([{ kind: 'compact', trigger: '', tokens: 0 }])
+    expect(parseLine(line({ type: 'system', subtype: 'other' }))).toEqual([])
+  })
+
   it('renders a pure-insertion Edit (empty old_string) as a +-only diff', () => {
     const content = [
       {

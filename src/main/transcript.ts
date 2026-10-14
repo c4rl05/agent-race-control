@@ -32,7 +32,17 @@ export function transcriptPath(cwd: string, sessionId: string): string {
   return join(claudeConfigDir(), 'projects', encoded, `${sessionId}.jsonl`)
 }
 
-export type PreviewItem = { kind: 'user'; text: string } | { kind: 'assistant'; text: string }
+// `compact` and `summary` are a compaction (2026-10-14): Claude Code writes a
+// `compact_boundary` system entry (auto or manual, and the context size it
+// compacted) and then the summary it continues from — as a USER entry, flagged
+// `isCompactSummary`. Read as an ordinary user entry, the summary drew as a
+// screen-long prompt you never wrote. The fold stays stateless (one line, its
+// items); Conversation.svelte pairs the two into one folded divider.
+export type PreviewItem =
+  | { kind: 'user'; text: string }
+  | { kind: 'assistant'; text: string }
+  | { kind: 'compact'; trigger: string; tokens: number }
+  | { kind: 'summary'; text: string }
 
 type Block = { type?: string; text?: string; name?: string; input?: unknown }
 
@@ -158,8 +168,11 @@ export function parseLine(line: string): PreviewItem[] {
 function parseLineInner(line: string): PreviewItem[] {
   let entry: {
     type?: string
+    subtype?: string
     isSidechain?: boolean
     isMeta?: boolean
+    isCompactSummary?: boolean
+    compactMetadata?: { trigger?: unknown; preTokens?: unknown }
     message?: { content?: string | Block[] }
   }
   try {
@@ -170,6 +183,28 @@ function parseLineInner(line: string): PreviewItem[] {
   // Sidechains are subagent chatter; meta entries are injected context
   // (caveats, command wrappers' stdout) — neither is the conversation.
   if (!entry || typeof entry !== 'object' || entry.isSidechain || entry.isMeta) return []
+
+  if (entry.type === 'system' && entry.subtype === 'compact_boundary') {
+    const meta = entry.compactMetadata
+    return [
+      {
+        kind: 'compact',
+        trigger: typeof meta?.trigger === 'string' ? meta.trigger : '',
+        tokens: typeof meta?.preTokens === 'number' ? meta.preTokens : 0
+      }
+    ]
+  }
+
+  if (entry.type === 'user' && entry.isCompactSummary) {
+    const content = entry.message?.content
+    const text =
+      typeof content === 'string'
+        ? content
+        : Array.isArray(content)
+          ? content.map((block) => (block?.type === 'text' ? block.text : '')).join('\n\n')
+          : ''
+    return text.trim() ? [{ kind: 'summary', text }] : []
+  }
 
   if (entry.type === 'user') {
     const content = entry.message?.content
@@ -217,7 +252,7 @@ function parseLineInner(line: string): PreviewItem[] {
     return items
   }
 
-  // summary / system / mode / attachment / file-history-snapshot / future types
+  // summary / other system / mode / attachment / file-history-snapshot / future types
   return []
 }
 

@@ -13,6 +13,8 @@ import {
   promptFontName,
   themeClass,
   themeVars,
+  terminalStack,
+  uiStack,
   uniqueName
 } from './previewTheme'
 import { splitLines } from './highlight'
@@ -25,9 +27,35 @@ describe('normalizeLook', () => {
 
   it('keeps every built-in exactly as written', () => {
     for (const theme of BUILTIN_THEMES) {
-      const { type, prompt, code } = theme
-      expect(normalizeLook({ type, prompt, code })).toEqual({ type, prompt, code })
+      const { type, prompt, code, app } = theme
+      expect(normalizeLook({ type, prompt, code, app })).toEqual({ type, prompt, code, app })
     }
+  })
+
+  // The App section (2026-10-14): only the faces the old pickers offered, and
+  // a theme from before it existed gets Today's — the pickers' old defaults.
+  it("takes the app fonts only from the old pickers' lists", () => {
+    const look = normalizeLook({ app: { terminal: 'JetBrains Mono', ui: 'Lora' } })
+    expect(look.app).toEqual({ terminal: 'JetBrains Mono', ui: TODAY.app.ui })
+    // A catalogue mono the terminal was never verified with is refused.
+    expect(normalizeLook({ app: { terminal: 'Geist Mono' } }).app.terminal).toBe(TODAY.app.terminal)
+    expect(normalizeLook({ type: { body: 'Lora' } }).app).toEqual(TODAY.app)
+    expect(TODAY.app).toEqual({ terminal: 'Cascadia Mono', ui: 'Inter' })
+  })
+
+  it("pairs a built-in's app fonts with its own, where the app can take them", () => {
+    const plex = BUILTIN_THEMES.find((t) => t.id === 'plex')!
+    expect(plex.app).toEqual({ terminal: 'IBM Plex Mono', ui: 'IBM Plex Sans' })
+    // Geist Mono and Geist are neither a terminal nor a chrome font.
+    const geist = BUILTIN_THEMES.find((t) => t.id === 'geist')!
+    expect(geist.app).toEqual(TODAY.app)
+  })
+
+  it('builds the app stacks exactly as the old pickers did', () => {
+    expect(terminalStack(TODAY)).toBe('"Cascadia Mono", Consolas, monospace')
+    expect(uiStack({ ...TODAY, app: { terminal: 'Consolas', ui: 'Roboto' } })).toBe(
+      "'Roboto', system-ui, sans-serif"
+    )
   })
 
   it('clamps numbers to the editor ranges and drops non-numbers', () => {
@@ -124,6 +152,7 @@ describe('export / import', () => {
     expect(imported.builtin).toBeUndefined()
     expect({ ...imported.type }).toEqual(editorial.type)
     expect(imported.code).toEqual(editorial.code)
+    expect(imported.app).toEqual(editorial.app)
   })
 
   it('refuses anything that is not an exported theme', () => {

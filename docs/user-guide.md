@@ -103,6 +103,7 @@ Right-click a row:
 - **Apply folder color** — types `/color <name>` so Claude's agent view matches the tower stripe. Claude rows only.
 - **Relaunch session** — ends this session's process and brings the *same conversation* straight back up in a fresh one. For when the CLI has updated under you, or the TUI is wedged. The row keeps its place, its name, its TODO flag and its notes; only the process underneath is new. Agent rows only — a shell has no conversation to resume, and restarting one is a close and a new row.
 - **Archive session** — files the row into its card's archive, below. The session carries on running.
+- **Archive all sessions below** — the same for every row under this one in the tower, across cards; each goes into its own card's archive, in the order it was in. Rows a filter is hiding are left alone.
 - **Close session** — kills the process and removes the row.
 
 ### The archive
@@ -191,14 +192,23 @@ A **read-only preview of the conversation**, rendered as markdown — headers, t
 
 A file that was written or edited arrives as a **tab carrying its name**, folded. Click the tab to unfold the code and click it again to put it away — so a long listing never buries the conversation around it, and you still see at a glance which file was touched.
 
+When a session **compacts**, the summary it carries on from shows as a dashed divider — *Context compacted · auto · 358k tokens* — rather than as a prompt you never wrote. Click it to read the summary, and again to fold it away.
+
+**Find** (`Ctrl+F` while you're on the Preview, or the **Find** button at the end of the tab row) searches the conversation as you type. Enter and Shift+Enter step through the matches, and a match inside a folded file opens it. Esc closes it.
+
+**Clear**, beside it, hides everything so far and shows only what the conversation says next — for watching a long session from here on. It then reads **Show all**, which brings the rest back. A clear lasts until you show all or restart the app.
+
+Right-click the Preview for **Copy**, **Select all** and **Find…**.
+
 Pure observation: nothing is injected, the terminal byte stream is untouched, and flipping between Terminal and Preview is instant.
 
-**Themes.** How the Preview reads is a theme: Settings → Preview → **Theme** switches between them, and **Open the theme editor** opens the editor over the whole window. It has four tabs:
+**Themes.** How the Preview reads — and the fonts of the terminal and the whole app — is a theme: Settings → Theme → **Theme** switches between them, and **Open the theme editor** opens the editor over the whole window. It has five tabs:
 
 - **Themes** lists the built-in themes and your own. Duplicate, rename and delete your own; **Export** copies the selected theme to the clipboard and **Import** adds one from it.
 - **Type** sets the background, then the font, weight, size and colour of the body, headings, bold text, links and code, plus line height, line length and spacing.
 - **Prompts** picks how your own prompts stand out (bar, bubble, margin label, heading, chevron and more), with their accent colour, tint and font.
 - **Code** picks a syntax colour theme for code blocks and diffs, with a dark and a light variant each, plus line numbers and corners.
+- **App** picks the terminal's font (Cascadia Mono, Consolas, JetBrains Mono, Fira Code, IBM Plex Mono) and the interface's (Inter, Segoe UI, Arial, Roboto, IBM Plex Sans), each listed in its own face. A code font of *Terminal font* follows the first. The built-in themes pair these with their own fonts where they can.
 
 The sample on the right is rendered exactly as the Preview renders, and **Hold to compare with Today** shows the old look while you hold it. Built-in themes never change: the first edit to one makes your own copy and selects it. **Today** is the default, and is the Preview as it looked before themes.
 
@@ -216,6 +226,8 @@ A plain-text scratchpad per session — the original Notepad, not an editor. No 
 
 The text is a field on the session, which decides both of its behaviours: notes **survive a restart** with the row, and they **die when the row is closed**. A note is about *this* session, not about the directory. It stays loaded while you're on another tab, so your undo history and scroll position are still there when you come back.
 
+Right-click for the usual **Undo, Redo, Cut, Copy, Paste, Delete, Select all** — as in every text box in the app.
+
 ## Appearance
 
 <picture>
@@ -223,11 +235,11 @@ The text is a field on the session, which decides both of its behaviours: notes 
   <img alt="The Settings modal" src="../images/arc-settings-light.png">
 </picture>
 
-The ☰ button opens Settings — one panel, three sections, closed with the ×, a click outside, or Escape.
+The ☰ button opens Settings — one panel, four sections, closed with the ×, a click outside, or Escape.
 
 **Appearance**
 
-- **Theme** — GitHub Light / Dark / System, the exact Primer palettes. This themes the app's chrome and terminal colors; Claude Code's own rendering passes through untouched.
+- **Mode** — GitHub Light / Dark / System, the exact Primer palettes. This sets the app's chrome and terminal colors; Claude Code's own rendering passes through untouched.
 - **Color title glyph** — paints the leading emoji or symbol of a row's name by which glyph it is, so sessions you've named with one are pickable out of the list by colour.
 
 **Status**
@@ -236,9 +248,14 @@ The ☰ button opens Settings — one panel, three sections, closed with the ×,
 - **Status RGB** — swaps the status dots' Primer tones for pure traffic-light red/amber/green.
 - **Detection** — which technique colours the dot. **Hooks + poll** is the default and the better of the two: Claude Code's own turn-boundary events decide red and amber, with the agent poll as a green floor. **Screen** instead reads the session's own screen — its spinner, its prompt box, an open dialog. The line under it spells out whichever you've picked. The setting governs **Claude rows only**, because they are the ones with a choice; Codex rows always read the screen, since their terminal title reports all three states on its own.
 
-**Fonts**
+**Power**
 
-Two pickers — the terminal's monospace face (Cascadia Mono, Consolas, JetBrains Mono, Fira Code, IBM Plex Mono) and the sans face for the app chrome. The Preview's fonts belong to its theme (see *Preview*). Each picker shows the face **in that face**, and unfolds to the whole list with every name likewise set in itself, so you're choosing by how it reads rather than by its name. Only one list is open at a time.
+- **Keep awake** — while the app is open the machine won't idle-sleep, so agents keep working. The screen still turns off.
+
+**Theme**
+
+- **Theme** — the theme: how the Preview reads, and the terminal and interface fonts (see *Preview*). Each name is shown in its theme's body font.
+- **Customize** — opens the theme editor.
 
 **Zoom** works two ways. `Ctrl+=` / `Ctrl+-` / `Ctrl+0` size the **whole window**, Windows-Terminal style. `Ctrl+wheel` over a pane sizes **just that pane** — the tower, the terminal, the Preview tab, the Session tab and the Notes tab each remember their own size, so you can read a transcript large while the tower stays small. The wheel moves in finer steps than the keys, two notches to each keypress, and reaches just as far either way. The terminal's share is a real font-size change: the grid reflows and the session is resized, exactly as in Windows Terminal. Pressing one of the window-zoom keys puts every pane back in step with the window.
 
@@ -250,6 +267,8 @@ The app deliberately adds *no* muscle memory on top of Windows Terminal, and sha
 |---|---|
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | copy / paste in the terminal |
 | Right-click in the terminal | copy selection, else paste |
+| Right-click in a text box | Undo / Redo / Cut / Copy / Paste / Delete / Select all |
+| `Ctrl+F` on the Preview | find in the conversation (Enter / Shift+Enter step, Esc closes) |
 | Drop a file on the terminal | pastes the quoted path |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | zoom the whole window in / out / reset (and resync the panes) |
 | `Ctrl+wheel` over a pane | zoom that pane alone |

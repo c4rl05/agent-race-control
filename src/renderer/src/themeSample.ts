@@ -1,8 +1,8 @@
 // The theme editor's sample conversation: every element the Preview can show
 // (headings, a list, a quote, a table, inline code, a file the session wrote,
-// an Edit diff, a folded file, a prose fence, prompts long and short), in the
-// exact shapes the reducer emits (transcript.ts) — so it renders through the
-// same path as a real transcript.
+// an Edit diff, a folded file, a prose fence, a compaction, prompts long and
+// short), in the exact shapes the reducer emits (transcript.ts) — so it renders
+// through the same path as a real transcript.
 
 const LISTING = `// A restored row waits behind a grey dot until it is first selected.
 export function startSession(session: Session): void {
@@ -93,6 +93,14 @@ npm run dev --silent   # renderer on http://localhost:5290
 3. Click a grey row and its conversation resumes.
 
 The decision is recorded in the [kickoff doc](#) under *Lazy start*.`
+  },
+  { kind: 'compact', trigger: 'auto', tokens: 162480 },
+  {
+    kind: 'summary',
+    text: `This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+1. **Primary request:** restored rows should spawn when selected, not all at once.
+2. **Done:** an \`unstarted\` status, \`startSession\`, the terminal mounted on first select. 268 tests pass.`
   },
   {
     kind: 'user',
